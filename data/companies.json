@@ -1,0 +1,160 @@
+[
+  {
+    "id": "4266cfaf-4f8b-425d-8ac3-940178723a45",
+    "name": "Teste",
+    "seats": 10,
+    "createdAt": "2026-03-21T13:37:54.987Z",
+    "tokens": [
+      {
+        "value": "8FAFE7FABA",
+        "companyId": "4266cfaf-4f8b-425d-8ac3-940178723a45",
+        "used": true,
+        "usedAt": "2026-03-21T13:43:00.980Z",
+        "responseId": "5e1f9d2c-52e8-4dc3-a544-a893602bc3f0"
+      },
+      {
+        "value": "AC36CCC3C9",
+        "companyId": "4266cfaf-4f8b-425d-8ac3-940178723a45",
+        "used": false
+      },
+      {
+        "value": "20FFD88526",
+        "companyId": "4266cfaf-4f8b-425d-8ac3-940178723a45",
+        "used": false
+      },
+      {
+        "value": "94B82F2EB3",
+        "companyId": "4266cfaf-4f8b-425d-8ac3-940178723a45",
+        "used": false
+      },
+      {
+        "value": "749D8520A0",
+        "companyId": "4266cfaf-4f8b-425d-8ac3-940178723a45",
+        "used": false
+      },
+      {
+        "value": "4D645BA6D1",
+        "companyId": "4266cfaf-4f8b-425d-8ac3-940178723a45",
+        "used": false
+      },
+      {
+        "value": "54A41A8DBE",
+        "companyId": "4266cfaf-4f8b-425d-8ac3-940178723a45",
+        "used": false
+      },
+      {
+        "value": "2EA2884827",
+        "companyId": "4266cfaf-4f8b-425d-8ac3-940178723a45",
+        "used": false
+      },
+      {
+        "value": "D5AD76E7F8",
+        "companyId": "4266cfaf-4f8b-425d-8ac3-940178723a45",
+        "used": false
+      },
+      {
+        "value": "5F5DBBFB8A",
+        "companyId": "4266cfaf-4f8b-425d-8ac3-940178723a45",
+        "used": false
+      }
+    ]
+  },
+  {
+    "id": "415c676b-61a3-44be-90ec-04c743794dec",
+    "name": "testee",
+    "seats": 10,
+    "createdAt": "2026-03-21T15:09:51.264Z",
+    "tokens": [
+      {
+        "value": "4FCBFF6558",
+        "companyId": "415c676b-61a3-44be-90ec-04c743794dec",
+        "tokenType": "member",
+        "label": "Avaliação individual",
+        "reusable": false,
+        "used": true,
+        "usedAt": "2026-03-21T15:15:18.082Z",
+        "responseId": "b96fe5c0-71e4-4030-b276-0b9a98494424"
+      },
+      {
+        "value": "4D1085AAD1",
+        "companyId": "415c676b-61a3-44be-90ec-04c743794dec",
+        "tokenType": "member",
+        "label": "Avaliação individual",
+        "reusable": false,
+        "used": false
+      },
+      {
+        "value": "73C1014DB4",
+        "companyId": "415c676b-61a3-44be-90ec-04c743794dec",
+        "tokenType": "member",
+        "label": "Avaliação individual",
+        "reusable": false,
+        "used": false
+      },
+      {
+        "value": "4599A0013C",
+        "companyId": "415c676b-61a3-44be-90ec-04c743794dec",
+        "tokenType": "member",
+        "label": "Avaliação individual",
+        "reusable": false,
+        "used": false
+      },
+      {
+        "value": "885E667102",
+        "companyId": "415c676b-61a3-44be-90ec-04c743794dec",
+        "tokenType": "member",
+        "label": "Avaliação individual",
+        "reusable": false,
+        "used": false
+      },
+      {
+        "value": "6CFA589F01",
+        "companyId": "415c676b-61a3-44be-90ec-04c743794dec",
+        "tokenType": "member",
+        "label": "Avaliação individual",
+        "reusable": false,
+        "used": false
+      },
+      {
+        "value": "B72A852527",
+        "companyId": "415c676b-61a3-44be-90ec-04c743794dec",
+        "tokenType": "member",
+        "label": "Avaliação individual",
+        "reusable": false,
+        "used": false
+      },
+      {
+        "value": "D1858C4648",
+        "companyId": "415c676b-61a3-44be-90ec-04c743794dec",
+        "tokenType": "member",
+        "label": "Avaliação individual",
+        "reusable": false,
+        "used": false
+      },
+      {
+        "value": "08C4A17388",
+        "companyId": "415c676b-61a3-44be-90ec-04c743794dec",
+        "tokenType": "member",
+        "label": "Avaliação individual",
+        "reusable": false,
+        "used": false
+      },
+      {
+        "value": "80D43DE876",
+        "companyId": "415c676b-61a3-44be-90ec-04c743794dec",
+        "tokenType": "member",
+        "label": "Avaliação individual",
+        "reusable": false,
+        "used": false
+      },
+      {
+        "value": "B8C9463D97",
+        "companyId": "415c676b-61a3-44be-90ec-04c743794dec",
+        "tokenType": "company",
+        "label": "Acesso diretoria/RH",
+        "reusable": true,
+        "used": false
+      }
+    ]
+  }
+]

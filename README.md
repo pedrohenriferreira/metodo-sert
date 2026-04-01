@@ -1,36 +1,58 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Método Sert · MVP
 
-## Getting Started
+Check-in de riscos psicossociais (NR-1) com questionário Likert e dashboard em tempo real. Inclui controle de tokens individuais por empresa para liberar o formulário.
 
-First, run the development server:
-
+## Rodar local
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Tokens e empresas
+- Defina a chave de administração em `.env.local`:
+```
+ADMIN_KEY=escolha-uma-chave-forte
+ADMIN_USER=admin
+ADMIN_PASS=senha-forte
+```
+- Crie tokens para uma empresa (um por colaborador):
+```bash
+curl -X POST http://localhost:3000/api/companies \
+  -H "x-admin-key: $ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Empresa Exemplo","seats":25}'
+```
+A resposta contém `company.tokens[]` com os códigos a distribuir aos colaboradores.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- Validar um token (antes do envio do formulário):
+```bash
+curl -X POST http://localhost:3000/api/tokens/validate \
+  -H "Content-Type: application/json" \
+  -d '{"token":"TOKENAQUI"}'
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Fluxo de coleta
+- Landing redireciona para `/form`.
+- Primeiro valida-se o token (tela dedicada). Só depois o formulário aparece.
+- Ao enviar, o token é consumido e o usuário é redirecionado para `/dashboard?view=<id_da_resposta>`.
+- Dashboard: `/dashboard` só responde se receber `view` válido (ou `x-admin-key` para uso interno).
+- Respostas ficam em `data/responses.json`; empresas e tokens em `data/companies.json`.
 
-## Learn More
+## Estrutura principal
+- `src/app/page.tsx`: redireciona para `/form`.
+- `src/app/form/page.tsx`: formulário + validação de token.
+- `src/app/dashboard/page.tsx`: dashboard protegido por `view` (ou admin key).
+- `src/app/admin/page.tsx`: painel protegido para gerar empresas/tokens.
+- `src/app/api/responses/route.ts`: grava respostas, valida token, calcula métricas.
+- `src/app/api/tokens/validate/route.ts`: valida tokens.
+- `src/app/api/companies/route.ts`: criação e listagem (chave admin).
+- `src/app/api/admin/login|logout`: autenticação de sessão admin.
+- `src/lib/questions.ts`: itens da escala.
+- `src/lib/metrics.ts`: cálculo de médias por dimensão e pergunta.
+- `src/lib/storage.ts`: persistência em arquivos JSON, geração/uso de tokens.
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Próximos passos sugeridos
+1. Trocar persistência por banco (SQLite/Prisma) para produção.
+2. Expor dashboard filtrado por empresa/time e exportação CSV.
+3. Configurar deploy (ex.: Vercel + storage externo) e HTTPS.
