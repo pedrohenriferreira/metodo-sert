@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { buildDashboardPayload, summarizeResponseRisk, ViewMode } from "@/lib/metrics";
+import { captureServerError } from "@/lib/observability";
 import { applyRateLimit, auditLog, createAuditContext, getAdminPrincipal } from "@/lib/security";
 import {
   consumeToken,
@@ -301,7 +302,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: getValidationMessage(error as never) }, { status: 400 });
     }
 
-    console.error("Erro ao salvar resposta", error);
+    captureServerError(error, {
+      route: "/api/responses",
+      operation: "submit_response",
+      details: auditContext,
+    });
     return NextResponse.json({ error: "Falha ao salvar resposta" }, { status: 500 });
   }
 }

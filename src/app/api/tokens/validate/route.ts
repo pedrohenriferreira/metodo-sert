@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { captureServerError } from "@/lib/observability";
 import { applyRateLimit, auditLog, createAuditContext } from "@/lib/security";
 import { getValidationMessage, tokenValidationSchema } from "@/lib/validation";
 import { findToken, validateToken } from "@/lib/storage";
@@ -45,17 +46,26 @@ export async function POST(request: NextRequest) {
   const { company, token: tokenData } = found;
   const memberTokens = company.tokens.filter((item) => item.tokenType === "member");
 
-  return NextResponse.json({
-    valid: true,
-    company: { id: company.id, name: company.name },
-    token: {
-      value: tokenData.value,
-      used: tokenData.used,
-      active: tokenData.active ?? true,
-      tokenType: tokenData.tokenType,
-      label: tokenData.label,
-    },
-    remaining: memberTokens.filter((item) => !item.used).length,
-    total: memberTokens.length,
-  });
+  try {
+    return NextResponse.json({
+      valid: true,
+      company: { id: company.id, name: company.name },
+      token: {
+        value: tokenData.value,
+        used: tokenData.used,
+        active: tokenData.active ?? true,
+        tokenType: tokenData.tokenType,
+        label: tokenData.label,
+      },
+      remaining: memberTokens.filter((item) => !item.used).length,
+      total: memberTokens.length,
+    });
+  } catch (error) {
+    captureServerError(error, {
+      route: "/api/tokens/validate",
+      operation: "validate_token",
+      details: auditContext,
+    });
+    return NextResponse.json({ valid: false, error: "Falha ao validar token" }, { status: 500 });
+  }
 }
