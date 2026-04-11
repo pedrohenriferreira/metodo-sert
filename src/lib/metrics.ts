@@ -159,10 +159,33 @@ export type DashboardPayload = {
   companyLabel: string;
   totalResponses: number;
   participationRate?: number;
+  activeTeamFilter?: string;
+  teamOptions: string[];
   individual: IndividualView | null;
-  companyView: CompanyView;
+  companyView: CompanyView | null;
+  companyAccess?: CompanyAccessSnapshot | null;
   allowedViews: ViewMode[];
   defaultView: ViewMode;
+};
+
+export type AccessTokenSnapshot = {
+  value: string;
+  used: boolean;
+  active: boolean;
+  usedAt?: string;
+  label: string;
+  reusable: boolean;
+  responseId?: string;
+  tokenType: "member" | "company";
+};
+
+export type CompanyAccessSnapshot = {
+  totalTokens: number;
+  usedTokens: number;
+  availableTokens: number;
+  alertCount: number;
+  memberTokens: AccessTokenSnapshot[];
+  companyTokens: AccessTokenSnapshot[];
 };
 
 function mean(values: number[]) {
@@ -748,11 +771,26 @@ export function buildDashboardPayload(args: {
   responses: ResponseRecord[];
   companyLabel: string;
   seats?: number;
+  teamOptions?: string[];
+  activeTeamFilter?: string;
   ownerResponseId?: string;
+  companyAccess?: CompanyAccessSnapshot | null;
+  includeCompanyView?: boolean;
   allowedViews?: ViewMode[];
   defaultView?: ViewMode;
 }): DashboardPayload {
-  const { companyLabel, ownerResponseId, responses, seats, allowedViews = ["company"], defaultView = "company" } = args;
+  const {
+    companyAccess = null,
+    companyLabel,
+    includeCompanyView = true,
+    teamOptions = [],
+    activeTeamFilter = "all",
+    ownerResponseId,
+    responses,
+    seats,
+    allowedViews = ["company"],
+    defaultView = "company",
+  } = args;
   const owner = ownerResponseId ? responses.find((response) => response.id === ownerResponseId) : null;
   const individual = owner ? buildIndividualView(computePerResponse(owner)) : null;
 
@@ -761,8 +799,11 @@ export function buildDashboardPayload(args: {
     companyLabel,
     totalResponses: responses.length,
     participationRate: seats ? percent(responses.length, seats) : undefined,
+    activeTeamFilter,
+    teamOptions,
     individual,
-    companyView: buildCompanyView(responses),
+    companyView: includeCompanyView ? buildCompanyView(responses) : null,
+    companyAccess: includeCompanyView ? companyAccess : null,
     allowedViews,
     defaultView,
   };

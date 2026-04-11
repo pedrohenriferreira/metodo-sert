@@ -1,65 +1,5 @@
 [
   {
-    "id": "4266cfaf-4f8b-425d-8ac3-940178723a45",
-    "name": "Teste",
-    "seats": 10,
-    "createdAt": "2026-03-21T13:37:54.987Z",
-    "tokens": [
-      {
-        "value": "8FAFE7FABA",
-        "companyId": "4266cfaf-4f8b-425d-8ac3-940178723a45",
-        "used": true,
-        "usedAt": "2026-03-21T13:43:00.980Z",
-        "responseId": "5e1f9d2c-52e8-4dc3-a544-a893602bc3f0"
-      },
-      {
-        "value": "AC36CCC3C9",
-        "companyId": "4266cfaf-4f8b-425d-8ac3-940178723a45",
-        "used": false
-      },
-      {
-        "value": "20FFD88526",
-        "companyId": "4266cfaf-4f8b-425d-8ac3-940178723a45",
-        "used": false
-      },
-      {
-        "value": "94B82F2EB3",
-        "companyId": "4266cfaf-4f8b-425d-8ac3-940178723a45",
-        "used": false
-      },
-      {
-        "value": "749D8520A0",
-        "companyId": "4266cfaf-4f8b-425d-8ac3-940178723a45",
-        "used": false
-      },
-      {
-        "value": "4D645BA6D1",
-        "companyId": "4266cfaf-4f8b-425d-8ac3-940178723a45",
-        "used": false
-      },
-      {
-        "value": "54A41A8DBE",
-        "companyId": "4266cfaf-4f8b-425d-8ac3-940178723a45",
-        "used": false
-      },
-      {
-        "value": "2EA2884827",
-        "companyId": "4266cfaf-4f8b-425d-8ac3-940178723a45",
-        "used": false
-      },
-      {
-        "value": "D5AD76E7F8",
-        "companyId": "4266cfaf-4f8b-425d-8ac3-940178723a45",
-        "used": false
-      },
-      {
-        "value": "5F5DBBFB8A",
-        "companyId": "4266cfaf-4f8b-425d-8ac3-940178723a45",
-        "used": false
-      }
-    ]
-  },
-  {
     "id": "415c676b-61a3-44be-90ec-04c743794dec",
     "name": "testee",
     "seats": 10,
@@ -73,7 +13,8 @@
         "reusable": false,
         "used": true,
         "usedAt": "2026-03-21T15:15:18.082Z",
-        "responseId": "b96fe5c0-71e4-4030-b276-0b9a98494424"
+        "responseId": "b96fe5c0-71e4-4030-b276-0b9a98494424",
+        "active": true
       },
       {
         "value": "4D1085AAD1",
@@ -81,7 +22,10 @@
         "tokenType": "member",
         "label": "Avaliação individual",
         "reusable": false,
-        "used": false
+        "used": true,
+        "active": true,
+        "usedAt": "2026-04-04T02:25:11.803Z",
+        "responseId": "1cd484a4-6e5b-4bf4-be82-44d5bdfd2cc9"
       },
       {
         "value": "73C1014DB4",
@@ -89,7 +33,8 @@
         "tokenType": "member",
         "label": "Avaliação individual",
         "reusable": false,
-        "used": false
+        "used": false,
+        "active": true
       },
       {
         "value": "4599A0013C",
@@ -97,7 +42,8 @@
         "tokenType": "member",
         "label": "Avaliação individual",
         "reusable": false,
-        "used": false
+        "used": false,
+        "active": true
       },
       {
         "value": "885E667102",
@@ -105,7 +51,8 @@
         "tokenType": "member",
         "label": "Avaliação individual",
         "reusable": false,
-        "used": false
+        "used": false,
+        "active": true
       },
       {
         "value": "6CFA589F01",
@@ -113,7 +60,8 @@
         "tokenType": "member",
         "label": "Avaliação individual",
         "reusable": false,
-        "used": false
+        "used": false,
+        "active": true
       },
       {
         "value": "B72A852527",
@@ -121,7 +69,8 @@
         "tokenType": "member",
         "label": "Avaliação individual",
         "reusable": false,
-        "used": false
+        "used": false,
+        "active": true
       },
       {
         "value": "D1858C4648",
@@ -129,7 +78,8 @@
         "tokenType": "member",
         "label": "Avaliação individual",
         "reusable": false,
-        "used": false
+        "used": false,
+        "active": true
       },
       {
         "value": "08C4A17388",
@@ -137,7 +87,8 @@
         "tokenType": "member",
         "label": "Avaliação individual",
         "reusable": false,
-        "used": false
+        "used": false,
+        "active": true
       },
       {
         "value": "80D43DE876",
@@ -145,7 +96,8 @@
         "tokenType": "member",
         "label": "Avaliação individual",
         "reusable": false,
-        "used": false
+        "used": false,
+        "active": true
       },
       {
         "value": "B8C9463D97",
@@ -153,7 +105,72 @@
         "tokenType": "company",
         "label": "Acesso diretoria/RH",
         "reusable": true,
-        "used": false
+        "used": false,
+        "active": true
+      }
+    ]
+  },
+  {
+    "id": "c2a5a013-e752-4d0f-b1d3-02c4b07e7cac",
+    "name": "teste_fluxo",
+    "seats": 5,
+    "createdAt": "2026-04-03T15:28:23.046Z",
+    "tokens": [
+      {
+        "value": "97FBBC8440",
+        "companyId": "c2a5a013-e752-4d0f-b1d3-02c4b07e7cac",
+        "tokenType": "member",
+        "label": "Avaliação individual",
+        "reusable": false,
+        "used": true,
+        "usedAt": "2026-04-03T15:37:45.394Z",
+        "responseId": "4bc299e3-432f-4997-937d-60dea0800585",
+        "active": true
+      },
+      {
+        "value": "42DFE9E20D",
+        "companyId": "c2a5a013-e752-4d0f-b1d3-02c4b07e7cac",
+        "tokenType": "member",
+        "label": "Avaliação individual",
+        "reusable": false,
+        "used": false,
+        "active": true
+      },
+      {
+        "value": "146106885D",
+        "companyId": "c2a5a013-e752-4d0f-b1d3-02c4b07e7cac",
+        "tokenType": "member",
+        "label": "Avaliação individual",
+        "reusable": false,
+        "used": false,
+        "active": true
+      },
+      {
+        "value": "7F35F9569D",
+        "companyId": "c2a5a013-e752-4d0f-b1d3-02c4b07e7cac",
+        "tokenType": "member",
+        "label": "Avaliação individual",
+        "reusable": false,
+        "used": false,
+        "active": true
+      },
+      {
+        "value": "72DB20AF7D",
+        "companyId": "c2a5a013-e752-4d0f-b1d3-02c4b07e7cac",
+        "tokenType": "member",
+        "label": "Avaliação individual",
+        "reusable": false,
+        "used": false,
+        "active": true
+      },
+      {
+        "value": "17FB5A46F1",
+        "companyId": "c2a5a013-e752-4d0f-b1d3-02c4b07e7cac",
+        "tokenType": "company",
+        "label": "Acesso diretoria/RH",
+        "reusable": true,
+        "used": false,
+        "active": true
       }
     ]
   }

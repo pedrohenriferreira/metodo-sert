@@ -1,0 +1,51 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Company {
+  id        String     @id
+  name      String
+  seats     Int
+  createdAt DateTime
+  tokens    Token[]
+  responses Response[]
+}
+
+model Token {
+  value      String    @id
+  companyId  String
+  tokenType  TokenType
+  label      String
+  reusable   Boolean
+  active     Boolean   @default(true)
+  used       Boolean   @default(false)
+  usedAt     DateTime?
+  responseId String?   @unique
+  company    Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  response   Response? @relation(fields: [responseId], references: [id], onDelete: SetNull)
+
+  @@index([companyId])
+}
+
+model Response {
+  id          String    @id
+  submittedAt DateTime
+  answers     Json
+  team        String?
+  role        String?
+  companyId   String?
+  triage      Json?
+  company     Company?  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  token       Token?
+
+  @@index([companyId])
+}
+
+enum TokenType {
+  member
+  company
+}

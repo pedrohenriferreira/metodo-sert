@@ -3,10 +3,11 @@
 import type { ComponentType } from "react";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Calendar, Layers3, Lock, ShieldCheck, Sparkles, Users } from "lucide-react";
+import { ArrowLeft, Ban, Calendar, Copy, Download, KeyRound, Layers3, Lock, RotateCcw, Settings2, ShieldAlert, ShieldCheck, Sparkles, Trash2, Users, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import type {
@@ -98,24 +99,57 @@ function DashboardContent() {
   const [status, setStatus] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<ViewMode>("company");
   const [blocked, setBlocked] = useState(false);
+  const [teamFilter, setTeamFilter] = useState("all");
 
   const viewKey = searchParams.get("view") ?? "";
   const memberToken = searchParams.get("memberToken") ?? "";
   const accessToken = searchParams.get("accessToken") ?? "";
   const companyId = searchParams.get("companyId") ?? "";
   const adminScope = searchParams.get("adminScope") ?? "";
+  const fromAdmin = searchParams.get("fromAdmin") === "1";
+
+  async function loadDashboard() {
+    const params = new URLSearchParams();
+    if (viewKey) params.set("viewKey", viewKey);
+    if (memberToken) params.set("memberToken", memberToken);
+    if (accessToken) params.set("accessToken", accessToken);
+    if (companyId) params.set("companyId", companyId);
+    if (adminScope) params.set("adminScope", adminScope);
+    if (teamFilter !== "all") params.set("team", teamFilter);
+
+    const endpoint = `/api/responses?${params.toString()}`;
+    const response = await fetch(endpoint);
+
+    if (!response.ok) {
+      setPayload(null);
+      setBlocked(true);
+      setStatus("Acesso restrito: confirme o token correto ou acesse pelo painel administrativo.");
+      return;
+    }
+
+    const data = (await response.json()) as DashboardPayload;
+    setPayload(data);
+    setActiveView(data.defaultView);
+    setTeamFilter(data.activeTeamFilter ?? "all");
+    setBlocked(false);
+    setStatus(null);
+  }
 
   useEffect(() => {
-    const load = async () => {
+    let cancelled = false;
+
+    async function hydrateDashboard() {
       const params = new URLSearchParams();
       if (viewKey) params.set("viewKey", viewKey);
       if (memberToken) params.set("memberToken", memberToken);
       if (accessToken) params.set("accessToken", accessToken);
       if (companyId) params.set("companyId", companyId);
       if (adminScope) params.set("adminScope", adminScope);
+      if (teamFilter !== "all") params.set("team", teamFilter);
 
       const endpoint = `/api/responses?${params.toString()}`;
       const response = await fetch(endpoint);
+      if (cancelled) return;
 
       if (!response.ok) {
         setPayload(null);
@@ -125,14 +159,21 @@ function DashboardContent() {
       }
 
       const data = (await response.json()) as DashboardPayload;
+      if (cancelled) return;
+
       setPayload(data);
       setActiveView(data.defaultView);
+      setTeamFilter(data.activeTeamFilter ?? "all");
       setBlocked(false);
       setStatus(null);
-    };
+    }
 
-    void load();
-  }, [accessToken, adminScope, companyId, memberToken, viewKey]);
+    void hydrateDashboard();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, adminScope, companyId, memberToken, teamFilter, viewKey]);
 
   const availableViews = useMemo(() => {
     if (!payload) return [] as Array<{ id: ViewMode; label: string; description: string }>;
@@ -171,6 +212,7 @@ function DashboardContent() {
         <div className="mx-auto w-full max-w-[1520px] space-y-8 px-4 py-6 lg:px-8 lg:py-8">
           <DashboardTopBar
             availableViews={availableViews}
+            fromAdmin={fromAdmin}
             payload={payload}
             resolvedActiveView={resolvedActiveView}
             setActiveView={setActiveView}
@@ -181,7 +223,18 @@ function DashboardContent() {
             {resolvedActiveView === "individual" && payload.individual && (
               <IndividualSection individual={payload.individual} />
             )}
-            {resolvedActiveView === "company" && <CompanySection companyView={payload.companyView} />}
+            {resolvedActiveView === "company" && payload.companyView && (
+              <CompanySection
+                companyView={payload.companyView}
+                companyAccess={payload.companyAccess ?? null}
+                companyLabel={payload.companyLabel}
+                accessToken={accessToken}
+                onRefresh={loadDashboard}
+                teamFilter={teamFilter}
+                teamOptions={payload.teamOptions}
+                setTeamFilter={setTeamFilter}
+              />
+            )}
           </div>
         </div>
       )}
@@ -203,27 +256,39 @@ function DashboardLoadingState() {
 
 function DashboardTopBar({
   availableViews,
+  fromAdmin,
   payload,
   resolvedActiveView,
   setActiveView,
   status,
 }: {
   availableViews: Array<{ id: ViewMode; label: string; description: string }>;
+  fromAdmin: boolean;
   payload: DashboardPayload;
   resolvedActiveView: ViewMode;
   setActiveView: (view: ViewMode) => void;
   status: string | null;
 }) {
+  const router = useRouter();
+
   return (
     <>
       <div className="w-full px-1 py-1 lg:px-2">
         <div className="flex flex-col gap-8">
           <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
             <div>
-              <span className="hero-pill">
-                <Sparkles className="h-3.5 w-3.5" />
-                Painel analitico NR-1
-              </span>
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="hero-pill">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Painel analitico NR-1
+                </span>
+                {fromAdmin && (
+                  <Button variant="outline" size="sm" onClick={() => router.push("/admin")}>
+                    <ArrowLeft className="h-4 w-4" />
+                    Voltar ao painel
+                  </Button>
+                )}
+              </div>
               <h1 className="mt-5 text-4xl font-semibold tracking-[-0.06em] lg:text-6xl">
                 {resolvedActiveView === "individual"
                   ? "Leitura Psicossocial Individual"
@@ -234,21 +299,23 @@ function DashboardTopBar({
               </p>
             </div>
             <div className="flex flex-col gap-4 xl:items-end">
-              <div className="grid gap-4 sm:grid-cols-3">
-                <MiniMetric icon={Users} label="Respostas" value={`${payload.totalResponses}`} />
-                <MiniMetric
-                  icon={ShieldCheck}
-                  label="Adesão"
-                  value={typeof payload.participationRate === "number" ? `${payload.participationRate}%` : "--"}
-                />
-                <MiniMetric
-                  icon={Calendar}
-                  label="Atualização"
-                  value={new Date(payload.generatedAt).toLocaleDateString("pt-BR")}
-                />
-              </div>
+              {resolvedActiveView === "company" && (
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <MiniMetric icon={Users} label="Respostas" value={`${payload.totalResponses}`} />
+                  <MiniMetric
+                    icon={ShieldCheck}
+                    label="Adesão"
+                    value={typeof payload.participationRate === "number" ? `${payload.participationRate}%` : "--"}
+                  />
+                  <MiniMetric
+                    icon={Calendar}
+                    label="Atualização"
+                    value={new Date(payload.generatedAt).toLocaleDateString("pt-BR")}
+                  />
+                </div>
+              )}
 
-              {!!availableViews.length && (
+              {!!availableViews.length && resolvedActiveView === "company" && (
                 <div className="rounded-[1.7rem] border border-[var(--border)] bg-[rgba(255,255,255,0.9)] p-1.5 shadow-[0_12px_30px_rgba(129,155,179,0.10)]">
                   <div className="flex flex-wrap gap-1.5">
                     {availableViews.map((view) => (
@@ -307,10 +374,28 @@ function IndividualSection({ individual }: { individual: IndividualView }) {
       </div>
 
       <section className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
-        <KpiCard label="Índice individual" value={individual.overallAverage.toFixed(2)} helper="Escala 1-5" />
-        <KpiCard label="Faixa de risco" value={individual.riskBand} helper="Leitura individual" />
-        <KpiCard label="Maior atenção" value={individual.weakestDimension} helper="Dimensão mais sensível" />
-        <KpiCard label="Maior proteção" value={individual.strongestDimension} helper="Dimensão mais preservada" />
+        <KpiCard label="Índice individual" value={individual.overallAverage.toFixed(2)} helper="Escala 1-5" variant="individual" />
+        <KpiCard
+          label="Faixa de risco"
+          value={individual.riskBand}
+          helper="Leitura individual"
+          valueClassName="max-w-full text-[1.55rem] leading-tight md:text-[1.8rem] xl:text-[2.1rem] whitespace-normal break-normal"
+          variant="individual"
+        />
+        <KpiCard
+          label="Maior atenção"
+          value={individual.weakestDimension}
+          helper="Dimensão mais sensível"
+          valueClassName="max-w-full text-[1.55rem] leading-tight md:text-[1.8rem] xl:text-[2.1rem] whitespace-normal break-normal"
+          variant="individual"
+        />
+        <KpiCard
+          label="Maior proteção"
+          value={individual.strongestDimension}
+          helper="Dimensão mais preservada"
+          valueClassName="max-w-full text-[1.55rem] leading-tight md:text-[1.8rem] xl:text-[2.1rem] whitespace-normal break-normal"
+          variant="individual"
+        />
       </section>
 
       <section className="grid gap-10 xl:grid-cols-[1.05fr_0.95fr] xl:items-start">
@@ -354,11 +439,55 @@ function IndividualSection({ individual }: { individual: IndividualView }) {
   );
 }
 
-function CompanySection({ companyView }: { companyView: CompanyView }) {
+function CompanySection({
+  companyView,
+  companyAccess,
+  companyLabel,
+  accessToken,
+  onRefresh,
+  teamFilter,
+  teamOptions,
+  setTeamFilter,
+}: {
+  companyView: CompanyView;
+  companyAccess: DashboardPayload["companyAccess"];
+  companyLabel: string;
+  accessToken: string;
+  onRefresh: () => Promise<void>;
+  teamFilter: string;
+  teamOptions: string[];
+  setTeamFilter: (value: string) => void;
+}) {
+  const [tokenModalOpen, setTokenModalOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("panorama");
+
   return (
-    <Tabs defaultValue="panorama" className="space-y-6">
-      <TabsList className="grid w-full grid-cols-2 gap-2 lg:grid-cols-4">
+    <div className="space-y-6">
+      {!!teamOptions.length && activeTab !== "panorama" && (
+        <div className="flex flex-col gap-3 rounded-[1.6rem] border border-[var(--border)] bg-[rgba(255,255,255,0.72)] px-4 py-4 md:flex-row md:items-end md:justify-between">
+          <div className="space-y-1">
+            <p className="text-sm font-semibold text-[var(--foreground)]">Filtro global por time</p>
+            <p className="text-sm text-[var(--muted-foreground)]">
+              A visão empresa está mostrando os dados de {teamFilter === "all" ? "todos os times cadastrados" : `time: ${teamFilter}`}.
+            </p>
+          </div>
+          <div className="w-full md:w-[320px]">
+            <Select value={teamFilter} onChange={(event) => setTeamFilter(event.target.value)} aria-label="Filtrar visão empresa por time">
+              <option value="all">Todos os times</option>
+              {teamOptions.map((team) => (
+                <option key={team} value={team}>
+                  {team}
+                </option>
+              ))}
+            </Select>
+          </div>
+        </div>
+      )}
+
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+      <TabsList className="grid w-full grid-cols-2 gap-2 lg:grid-cols-5">
         <TabsTrigger value="panorama">Panorama executivo</TabsTrigger>
+        <TabsTrigger value="visao-geral">Visão geral</TabsTrigger>
         <TabsTrigger value="diagnostico">Diagnóstico</TabsTrigger>
         <TabsTrigger value="recortes">Recortes</TabsTrigger>
         <TabsTrigger value="tecnico">Camada técnica</TabsTrigger>
@@ -369,6 +498,95 @@ function CompanySection({ companyView }: { companyView: CompanyView }) {
           eyebrow="Panorama executivo"
           title="Resumo rápido da saúde psicossocial"
           description="Primeira leitura da base com KPIs centrais e o mapa visual mais importante para diretoria e RH."
+        />
+
+        {companyAccess && (
+          <section className="space-y-6">
+            <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-5">
+              <KpiCard label="Respostas" value={`${companyView.totalResponses}`} helper="Base respondida" />
+              <KpiCard label="Tokens totais" value={`${companyAccess.totalTokens}`} helper="Convites emitidos" />
+              <KpiCard label="Disponíveis" value={`${companyAccess.availableTokens}`} helper="Tokens livres" />
+              <KpiCard label="Usados" value={`${companyAccess.usedTokens}`} helper="Tokens consumidos" />
+              <KpiCard label="Alertas" value={`${companyAccess.alertCount}`} helper="Alta atenção + crítico" />
+            </div>
+
+            <Card className="rounded-[26px] border-[var(--border)] bg-[rgba(255,255,255,0.88)] shadow-[0_18px_45px_rgba(44,62,80,0.06)]">
+              <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div className="flex items-center gap-3">
+                    <CardTitle className="text-xl">Bloco de tokens</CardTitle>
+                    <div className="group relative">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-9 w-9 rounded-full"
+                        onClick={() => setTokenModalOpen(true)}
+                        aria-label="Configurações do token"
+                      >
+                        <Settings2 className="h-4 w-4" />
+                      </Button>
+                      <div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 hidden -translate-x-1/2 whitespace-nowrap rounded-xl border border-[var(--border)] bg-white px-3 py-2 text-xs text-[var(--muted-foreground)] shadow-[0_14px_30px_rgba(44,62,80,0.12)] group-hover:block group-focus-within:block">
+                        Configurações do token
+                      </div>
+                    </div>
+                  </div>
+                  <CardDescription>
+                    Tokens institucionais e individuais disponíveis para cópia rápida.
+                  </CardDescription>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => exportTokensCsv(companyAccess, companyLabel)}
+                >
+                  <Download className="h-4 w-4" />
+                  Exportar
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-[var(--foreground)]">
+                    <ShieldAlert className="h-4 w-4 text-[var(--primary)]" />
+                    Visão empresa
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {companyAccess.companyTokens.map((token) => (
+                      <TokenChip key={token.value} value={token.value} used={token.used} active={token.active} />
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-[var(--foreground)]">
+                    <KeyRound className="h-4 w-4 text-[var(--primary)]" />
+                    Tokens individuais
+                  </div>
+                  <div className="flex max-h-56 flex-wrap gap-2 overflow-y-auto pr-1">
+                    {companyAccess.memberTokens.map((token) => (
+                      <TokenChip key={token.value} value={token.value} used={token.used} active={token.active} />
+                    ))}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <TokenSettingsModal
+              accessToken={accessToken}
+              companyAccess={companyAccess}
+              companyLabel={companyLabel}
+              onClose={() => setTokenModalOpen(false)}
+              onRefresh={onRefresh}
+              open={tokenModalOpen}
+            />
+          </section>
+        )}
+      </TabsContent>
+
+      <TabsContent value="visao-geral" className="space-y-8">
+        <SectionHeader
+          eyebrow="Visão geral"
+          title="Indicadores centrais da base"
+          description="KPIs executivos e gráficos principais para leitura rápida do risco e da incidência por categoria."
         />
 
         <section className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
@@ -565,7 +783,8 @@ function CompanySection({ companyView }: { companyView: CompanyView }) {
           </CardContent>
         </Card>
       </TabsContent>
-    </Tabs>
+      </Tabs>
+    </div>
   );
 }
 
@@ -589,16 +808,288 @@ function SectionHeader({
   );
 }
 
-function KpiCard({ label, value, helper }: { label: string; value: string; helper: string }) {
+function KpiCard({
+  label,
+  value,
+  helper,
+  valueClassName,
+  centered = false,
+  variant = "default",
+}: {
+  label: string;
+  value: string;
+  helper: string;
+  valueClassName?: string;
+  centered?: boolean;
+  variant?: "default" | "individual";
+}) {
+  if (variant === "individual") {
+    return (
+        <Card className="overflow-hidden rounded-[2rem] border-[rgba(191,211,226,0.9)] bg-[rgba(255,255,255,0.96)] shadow-[0_18px_42px_rgba(129,155,179,0.12)]">
+          <CardContent className="flex min-h-[182px] flex-col justify-between p-0">
+          <div className="space-y-5 px-6 pt-6">
+            <div className="inline-flex w-fit rounded-full border border-[rgba(106,161,160,0.16)] bg-[rgba(238,246,246,0.92)] px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--muted-foreground)]">
+              {label}
+            </div>
+            <p
+              className={cn(
+                "max-w-full pl-2 pr-2 text-left text-5xl font-semibold tracking-[-0.06em] text-[var(--foreground)]",
+                valueClassName
+              )}
+            >
+              {value}
+            </p>
+          </div>
+          <div className="px-6 pb-5 pl-8 pr-3 text-left text-sm font-medium text-[var(--primary)]">
+            {helper}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card className="metric-card">
-      <CardContent className="p-0">
-        <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--muted-foreground)]">{label}</p>
-        <p className="mt-4 text-5xl font-semibold leading-tight tracking-[-0.06em] text-[var(--foreground)]">{value}</p>
-        <p className="mt-2 text-sm text-[var(--primary)]">{helper}</p>
+      <CardContent className={cn("flex min-h-[204px] flex-col p-0", centered && "items-center text-center")}>
+        <p className={cn("font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--muted-foreground)]", centered && "w-full text-left")}>
+          {label}
+        </p>
+        <p
+          className={cn(
+            "mt-4 text-5xl font-semibold leading-[0.98] tracking-[-0.06em] text-[var(--foreground)]",
+            valueClassName
+          )}
+        >
+          {value}
+        </p>
+        <p className="mt-auto pt-3 text-sm text-[var(--primary)]">{helper}</p>
       </CardContent>
     </Card>
   );
+}
+
+function TokenChip({ value, used, active }: { value: string; used: boolean; active: boolean }) {
+  async function handleCopy() {
+    await navigator.clipboard.writeText(value);
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void handleCopy()}
+      className={cn(
+        "inline-flex items-center gap-2 rounded-full border px-3 py-2 text-left text-xs font-medium transition-colors",
+        active === false
+          ? "border-[rgba(136,163,191,0.2)] bg-[rgba(243,246,249,0.95)] text-[var(--muted-foreground)]"
+          : used
+          ? "border-[rgba(106,161,160,0.24)] bg-[rgba(238,246,246,0.92)] text-[var(--foreground)]"
+          : "border-[var(--border)] bg-[var(--accent)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+      )}
+    >
+      <Copy className="h-3.5 w-3.5" />
+      <span className="break-all">{value}</span>
+      {active === false ? <span className="text-[10px] uppercase tracking-[0.12em]">inativo</span> : null}
+      {active !== false && used ? <span className="text-[10px] uppercase tracking-[0.12em]">usado</span> : null}
+    </button>
+  );
+}
+
+function TokenSettingsModal({
+  accessToken,
+  companyAccess,
+  companyLabel,
+  onClose,
+  onRefresh,
+  open,
+}: {
+  accessToken: string;
+  companyAccess: NonNullable<DashboardPayload["companyAccess"]>;
+  companyLabel: string;
+  onClose: () => void;
+  onRefresh: () => Promise<void>;
+  open: boolean;
+}) {
+  const [pendingToken, setPendingToken] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+
+  if (!open) return null;
+
+  const tokenGroups = [
+    { title: "Visão empresa", tokens: companyAccess.companyTokens },
+    { title: "Tokens individuais", tokens: companyAccess.memberTokens },
+  ];
+
+  async function handleTokenAction(tokenValue: string, action: "reset" | "toggle-active" | "delete") {
+    const actionLabel =
+      action === "reset"
+        ? "resetar"
+        : action === "toggle-active"
+          ? "alterar o status"
+          : "excluir";
+    const confirmed = window.confirm(`Deseja ${actionLabel} o token ${tokenValue}?`);
+    if (!confirmed) return;
+
+    setPendingToken(tokenValue);
+    setStatus(null);
+
+    const response = await fetch("/api/tokens/manage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action,
+        targetToken: tokenValue,
+        accessToken: accessToken || undefined,
+      }),
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      setStatus(data.error ?? "Falha ao atualizar token.");
+      setPendingToken(null);
+      return;
+    }
+
+    await onRefresh();
+    setPendingToken(null);
+    setStatus(
+      action === "reset"
+        ? "Token resetado e vínculo anterior removido."
+        : action === "toggle-active"
+          ? "Status do token atualizado."
+          : "Token excluído com sucesso."
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(36,49,77,0.34)] px-4 py-6">
+      <div className="w-full max-w-5xl rounded-[28px] border border-[var(--border)] bg-[rgba(255,255,255,0.97)] shadow-[0_30px_80px_rgba(36,49,77,0.24)]">
+        <div className="flex items-start justify-between gap-4 border-b border-[var(--border)] px-6 py-5">
+          <div>
+            <h3 className="text-xl font-semibold tracking-[-0.04em] text-[var(--foreground)]">Configurações de tokens</h3>
+            <p className="mt-2 text-sm text-[var(--muted-foreground)]">
+              {companyLabel}. O token institucional é fixo. Nos tokens individuais, resetar remove o vínculo atual; inativar bloqueia o uso; excluir remove o token do sistema.
+            </p>
+          </div>
+          <Button type="button" variant="ghost" size="icon" className="h-10 w-10 rounded-full" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <div className="max-h-[72vh] space-y-6 overflow-y-auto px-6 py-6">
+          {status ? (
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--accent)] px-4 py-3 text-sm text-[var(--muted-foreground)]">
+              {status}
+            </div>
+          ) : null}
+
+          {tokenGroups.map((group) => (
+            <section key={group.title} className="space-y-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-[var(--foreground)]">
+                {group.title === "Visão empresa" ? <ShieldAlert className="h-4 w-4 text-[var(--primary)]" /> : <KeyRound className="h-4 w-4 text-[var(--primary)]" />}
+                {group.title}
+              </div>
+
+              <div className="space-y-3">
+                {group.tokens.map((token) => {
+                  const busy = pendingToken === token.value;
+                  const isInstitutionalToken = token.tokenType === "company";
+
+                  return (
+                    <div key={token.value} className="rounded-[22px] border border-[var(--border)] bg-white px-4 py-4 shadow-sm">
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-sm font-semibold text-[var(--foreground)]">{token.label}</p>
+                            <span className="rounded-full border border-[var(--border)] bg-[var(--accent)] px-2.5 py-1 text-[10px] font-mono uppercase tracking-[0.14em] text-[var(--muted-foreground)]">
+                              {token.tokenType === "company" ? "empresa" : "individual"}
+                            </span>
+                            <span className="rounded-full border border-[var(--border)] bg-[var(--accent)] px-2.5 py-1 text-[10px] font-mono uppercase tracking-[0.14em] text-[var(--muted-foreground)]">
+                              {token.active ? (token.used ? "usado" : "ativo") : "inativo"}
+                            </span>
+                          </div>
+                          <p className="break-all text-sm tracking-[0.08em] text-[var(--foreground)]">{token.value}</p>
+                        </div>
+
+                        {isInstitutionalToken ? (
+                          <div className="rounded-full border border-[var(--border)] bg-[var(--accent)] px-3 py-2 text-xs font-medium text-[var(--muted-foreground)]">
+                            Token institucional protegido
+                          </div>
+                        ) : (
+                          <div className="flex flex-wrap gap-2">
+                            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void handleTokenAction(token.value, "reset")}>
+                              <RotateCcw className="h-4 w-4" />
+                              Resetar
+                            </Button>
+                            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void handleTokenAction(token.value, "toggle-active")}>
+                              <Ban className="h-4 w-4" />
+                              {token.active ? "Inativar" : "Reativar"}
+                            </Button>
+                            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void handleTokenAction(token.value, "delete")}>
+                              <Trash2 className="h-4 w-4" />
+                              Excluir
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function exportTokensCsv(companyAccess: NonNullable<DashboardPayload["companyAccess"]>, companyLabel: string) {
+  const rows = [
+    ["empresa", "tipo", "rotulo", "token", "status", "ativo", "reutilizavel", "usado_em", "response_id"],
+    ...companyAccess.companyTokens.map((token) => [
+      companyLabel,
+      "institucional",
+      token.label,
+      token.value,
+      token.used ? "usado" : "disponivel",
+      token.active ? "sim" : "nao",
+      token.reusable ? "sim" : "nao",
+      token.usedAt ?? "",
+      token.responseId ?? "",
+    ]),
+    ...companyAccess.memberTokens.map((token) => [
+      companyLabel,
+      "individual",
+      token.label,
+      token.value,
+      token.used ? "usado" : "disponivel",
+      token.active ? "sim" : "nao",
+      token.reusable ? "sim" : "nao",
+      token.usedAt ?? "",
+      token.responseId ?? "",
+    ]),
+  ];
+
+  const csv = rows
+    .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(";"))
+    .join("\n");
+
+  const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const normalizedLabel = companyLabel
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+
+  link.href = url;
+  link.download = `tokens-${normalizedLabel || "empresa"}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 function InsightCard({ title, detail, tone }: { title: string; detail: string; tone: string }) {

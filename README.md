@@ -5,17 +5,37 @@ Check-in de riscos psicossociais (NR-1) com questionário Likert e dashboard em 
 ## Rodar local
 ```bash
 npm install
+npx prisma generate
 npm run dev
 # http://localhost:3000
 ```
 
-## Tokens e empresas
-- Defina a chave de administração em `.env.local`:
-```
+## Configuração
+- Defina as variáveis em `.env.local`:
+```bash
+DATABASE_URL="postgresql://postgres.SEU-PROJECT-REF:SUA-SENHA@aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require"
+DIRECT_URL="postgresql://postgres:SUA-SENHA@db.SEU-PROJECT-REF.supabase.co:5432/postgres?sslmode=require"
 ADMIN_KEY=escolha-uma-chave-forte
 ADMIN_USER=admin
 ADMIN_PASS=senha-forte
 ```
+
+## Banco de dados
+- Para usar Supabase:
+  1. Crie um projeto no Supabase.
+  2. Em `Project Settings > Database`, copie a `Connection string`.
+  3. Use a URL do `pooler` em `DATABASE_URL`.
+  4. Use a conexão direta (`db.<project-ref>.supabase.co:5432`) em `DIRECT_URL`.
+- Aplicar o schema no PostgreSQL:
+```bash
+npm run db:push
+```
+- Importar os dados atuais dos arquivos JSON para o banco:
+```bash
+npm run db:import-json
+```
+
+## Tokens e empresas
 - Crie tokens para uma empresa (um por colaborador):
 ```bash
 curl -X POST http://localhost:3000/api/companies \
@@ -37,7 +57,7 @@ curl -X POST http://localhost:3000/api/tokens/validate \
 - Primeiro valida-se o token (tela dedicada). Só depois o formulário aparece.
 - Ao enviar, o token é consumido e o usuário é redirecionado para `/dashboard?view=<id_da_resposta>`.
 - Dashboard: `/dashboard` só responde se receber `view` válido (ou `x-admin-key` para uso interno).
-- Respostas ficam em `data/responses.json`; empresas e tokens em `data/companies.json`.
+- Respostas, empresas e tokens ficam persistidos em PostgreSQL.
 
 ## Estrutura principal
 - `src/app/page.tsx`: redireciona para `/form`.
@@ -53,6 +73,6 @@ curl -X POST http://localhost:3000/api/tokens/validate \
 - `src/lib/storage.ts`: persistência em arquivos JSON, geração/uso de tokens.
 
 ## Próximos passos sugeridos
-1. Trocar persistência por banco (SQLite/Prisma) para produção.
+1. Adicionar migrations versionadas e pipeline de banco para produção.
 2. Expor dashboard filtrado por empresa/time e exportação CSV.
 3. Configurar deploy (ex.: Vercel + storage externo) e HTTPS.

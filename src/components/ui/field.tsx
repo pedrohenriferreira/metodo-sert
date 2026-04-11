@@ -32,7 +32,7 @@ export function FieldLabel({ className, ...props }: React.ComponentProps<typeof 
   return (
     <Label
       className={cn(
-        "block font-mono text-[11px] font-medium uppercase tracking-[0.22em] text-[var(--muted-foreground)]",
+        "flex min-h-[2.5rem] items-start font-mono text-[11px] font-medium uppercase tracking-[0.22em] text-[var(--muted-foreground)]",
         className
       )}
       {...props}

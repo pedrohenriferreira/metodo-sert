@@ -14,6 +14,7 @@ function isAuthorized(request: NextRequest) {
 function normalizeToken(token: {
   value: string;
   used: boolean;
+  active?: boolean;
   usedAt?: string;
   label?: string;
   reusable?: boolean;
@@ -26,6 +27,7 @@ function normalizeToken(token: {
   return {
     value: token.value,
     used: token.used,
+    active: token.active ?? true,
     usedAt: token.usedAt,
     label:
       token.label ??

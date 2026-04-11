@@ -40,7 +40,7 @@ type SubmitResponse = {
 type TokenValidation = {
   valid: boolean;
   company?: { id: string; name: string };
-  token?: { value: string; used: boolean };
+  token?: { value: string; used: boolean; tokenType?: "member" | "company"; label?: string };
   remaining?: number;
   total?: number;
   error?: string;
@@ -100,6 +100,8 @@ function FormContent() {
   const [phase, setPhase] = useState<"token" | "triage" | "form">("token");
   const [team, setTeam] = useState("");
   const [role, setRole] = useState("");
+  const [tenureUnit, setTenureUnit] = useState<"months" | "years">("months");
+  const [tenureValue, setTenureValue] = useState("");
   const [triage, setTriage] = useState<TriageForm>({
     workModel: "",
     shift: "",
@@ -140,13 +142,21 @@ function FormContent() {
       return;
     }
 
+    if (data.token?.tokenType === "company") {
+      setCompanyName(data.company?.name ?? null);
+      setTokenValidated(false);
+      setStatus(`Token institucional validado para ${data.company?.name ?? "empresa"}. Abrindo visão empresa...`);
+      router.push(`/dashboard?accessToken=${tokenValue}`);
+      return;
+    }
+
     setCompanyName(data.company?.name ?? null);
     setTokenValidated(true);
     setStatus(
-      `Token válido para ${data.company?.name ?? "empresa"} · saldo ${data.remaining}/${data.total}`
+      `Token individual válido para ${data.company?.name ?? "empresa"} · sua resposta abrirá apenas a sua visão individual. Saldo ${data.remaining}/${data.total}`
     );
     setPhase("triage");
-  }, [token]);
+  }, [router, token]);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -208,6 +218,41 @@ function FormContent() {
     () => questions.filter((question) => typeof answers[question.id] === "number").length,
     [answers]
   );
+
+  function convertTenureToMonths(rawValue: string, unit: "months" | "years") {
+    if (!rawValue.trim()) return 0;
+
+    const parsed = Number(rawValue.replace(",", "."));
+    if (Number.isNaN(parsed) || parsed < 0) return 0;
+
+    return unit === "months" ? Math.round(parsed) : Math.round(parsed * 12);
+  }
+
+  function formatTenureValue(months: number, unit: "months" | "years") {
+    if (!months) return "";
+    if (unit === "months") return String(months);
+
+    const years = months / 12;
+    return Number.isInteger(years) ? String(years) : years.toFixed(1).replace(/\.0$/, "");
+  }
+
+  function handleTenureValueChange(nextValue: string) {
+    setTenureValue(nextValue);
+    setTriage((prev) => ({
+      ...prev,
+      tenureMonths: convertTenureToMonths(nextValue, tenureUnit),
+    }));
+  }
+
+  function handleTenureUnitChange(nextUnit: "months" | "years") {
+    const currentMonths = convertTenureToMonths(tenureValue, tenureUnit);
+    setTenureUnit(nextUnit);
+    setTenureValue(formatTenureValue(currentMonths, nextUnit));
+    setTriage((prev) => ({
+      ...prev,
+      tenureMonths: currentMonths,
+    }));
+  }
 
   return (
     <div className="shell-page min-h-screen text-[var(--foreground)]">
@@ -353,15 +398,48 @@ function FormContent() {
                       ["turnos", "Turnos/escala"],
                     ]}
                   />
-                  <Field label="Tempo na empresa (meses)" htmlFor="tenureMonths">
+                  <Field
+                    htmlFor="tenureMonths"
+                    label={
+                      <span className="inline-flex flex-wrap items-center gap-2">
+                        <span>Tempo na empresa</span>
+                        <span className="inline-flex items-center rounded-full border border-[rgba(136,163,191,0.14)] bg-[rgba(255,255,255,0.5)] p-px">
+                          <button
+                            type="button"
+                            onClick={() => handleTenureUnitChange("months")}
+                            className={cn(
+                              "rounded-full px-2 py-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.18em] leading-none transition-colors",
+                              tenureUnit === "months"
+                                ? "bg-[rgba(106,161,160,0.14)] text-[var(--foreground)]"
+                                : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                            )}
+                          >
+                            Meses
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleTenureUnitChange("years")}
+                            className={cn(
+                              "rounded-full px-2 py-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.18em] leading-none transition-colors",
+                              tenureUnit === "years"
+                                ? "bg-[rgba(106,161,160,0.14)] text-[var(--foreground)]"
+                                : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                            )}
+                          >
+                            Ano(s)
+                          </button>
+                        </span>
+                      </span>
+                    }
+                  >
                     <Input
                       id="tenureMonths"
                       type="number"
                       min={0}
-                      value={triage.tenureMonths}
-                      onChange={(e) =>
-                        setTriage((prev) => ({ ...prev, tenureMonths: Number(e.target.value) }))
-                      }
+                      step={tenureUnit === "years" ? "0.1" : "1"}
+                      value={tenureValue}
+                      onChange={(e) => handleTenureValueChange(e.target.value)}
+                      placeholder={tenureUnit === "years" ? "Ex: 2" : "Ex: 24"}
                     />
                   </Field>
                   <Field label="Área/segmento" htmlFor="area">
