@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { summarizeResponseRisk } from "@/lib/metrics";
+import { applyRateLimit, auditLog, createAuditContext, getAdminPrincipal } from "@/lib/security";
+import {
+  createCompanySchema,
+  deleteCompanyOrResponseSchema,
+  getValidationMessage,
+} from "@/lib/validation";
 import { createCompany, deleteCompany, deleteResponse, listCompanies, readResponses } from "@/lib/storage";
 
-const ADMIN_KEY = process.env.ADMIN_KEY;
-
 function isAuthorized(request: NextRequest) {
-  const header = request.headers.get("x-admin-key");
-  const session = request.cookies.get("adminSession")?.value === "ok";
-  const keyOk = ADMIN_KEY && header === ADMIN_KEY;
-  return keyOk || session;
+  return getAdminPrincipal(request);
 }
 
 function normalizeToken(token: {
@@ -39,8 +40,14 @@ function normalizeToken(token: {
 }
 
 export async function GET(request: NextRequest) {
-  if (!isAuthorized(request)) {
+  const principal = isAuthorized(request);
+  if (!principal) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const rateLimit = applyRateLimit(`companies:get:${createAuditContext(request).ip}`, 120, 60 * 1000);
+  if (!rateLimit.allowed) {
+    return NextResponse.json({ error: "Muitas requisições." }, { status: 429 });
   }
 
   const [companies, responses] = await Promise.all([listCompanies(), readResponses()]);
@@ -124,46 +131,81 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  if (!isAuthorized(request)) {
+  const principal = isAuthorized(request);
+  const auditContext = createAuditContext(request);
+  if (!principal) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  try {
-    const body = await request.json();
-    const { name, seats } = body as { name: string; seats: number };
+  const rateLimit = applyRateLimit(`companies:post:${auditContext.ip}`, 20, 15 * 60 * 1000);
+  if (!rateLimit.allowed) {
+    auditLog("warn", "company.create.rate_limited", auditContext);
+    return NextResponse.json({ error: "Muitas tentativas. Aguarde antes de tentar novamente." }, { status: 429 });
+  }
 
-    if (!name || !seats) {
-      return NextResponse.json({ error: "Nome e quantidade são obrigatórios" }, { status: 400 });
-    }
+  try {
+    const { name, seats } = createCompanySchema.parse(await request.json());
 
     const company = await createCompany(name, Number(seats));
+    auditLog("info", "company.create", {
+      ...auditContext,
+      principal: principal.kind,
+      companyId: company.id,
+      seats,
+    });
     return NextResponse.json({ company });
   } catch (error) {
+    if (error instanceof Error && error.name === "ZodError") {
+      return NextResponse.json({ error: getValidationMessage(error as never) }, { status: 400 });
+    }
+
     console.error("Erro ao criar empresa", error);
     return NextResponse.json({ error: "Falha ao criar empresa" }, { status: 500 });
   }
 }
 
 export async function DELETE(request: NextRequest) {
-  if (!isAuthorized(request)) {
+  const principal = isAuthorized(request);
+  const auditContext = createAuditContext(request);
+  if (!principal) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const rateLimit = applyRateLimit(`companies:delete:${auditContext.ip}`, 20, 15 * 60 * 1000);
+  if (!rateLimit.allowed) {
+    auditLog("warn", "company.delete.rate_limited", auditContext);
+    return NextResponse.json({ error: "Muitas tentativas. Aguarde antes de tentar novamente." }, { status: 429 });
+  }
+
   try {
-    const body = (await request.json()) as { companyId?: string; responseId?: string };
+    const body = deleteCompanyOrResponseSchema.parse(await request.json());
 
     if (body.companyId) {
       await deleteCompany(body.companyId);
+      auditLog("warn", "company.delete", {
+        ...auditContext,
+        principal: principal.kind,
+        companyId: body.companyId,
+      });
       return NextResponse.json({ ok: true });
     }
 
     if (body.responseId) {
       await deleteResponse(body.responseId);
+      auditLog("warn", "response.delete", {
+        ...auditContext,
+        principal: principal.kind,
+        responseId: body.responseId,
+      });
       return NextResponse.json({ ok: true });
     }
 
     return NextResponse.json({ error: "Informe companyId ou responseId" }, { status: 400 });
   } catch (error) {
+    if (error instanceof Error && error.name === "ZodError") {
+      return NextResponse.json({ error: getValidationMessage(error as never) }, { status: 400 });
+    }
+
     console.error("Erro ao excluir registro", error);
     return NextResponse.json({ error: "Falha ao excluir registro" }, { status: 500 });
   }

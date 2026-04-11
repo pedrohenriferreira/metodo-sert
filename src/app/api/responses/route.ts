@@ -1,24 +1,20 @@
 import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { buildDashboardPayload, summarizeResponseRisk, ViewMode } from "@/lib/metrics";
-import { questions } from "@/lib/questions";
+import { applyRateLimit, auditLog, createAuditContext, getAdminPrincipal } from "@/lib/security";
 import {
-  Answer,
   consumeToken,
   LikertValue,
   listCompanies,
   readResponses,
   ResponseRecord,
   saveResponse,
-  TriageData,
   validateToken,
 } from "@/lib/storage";
+import { getValidationMessage, submitResponseSchema, tokenSchema } from "@/lib/validation";
 
 function isAdminAuthorized(request: NextRequest) {
-  const adminKey = request.headers.get("x-admin-key");
-  const ADMIN_KEY = process.env.ADMIN_KEY;
-  const adminSession = request.cookies.get("adminSession")?.value === "ok";
-  return Boolean((adminKey && ADMIN_KEY && adminKey === ADMIN_KEY) || adminSession);
+  return getAdminPrincipal(request);
 }
 
 function withAllowedViews(allowedViews: ViewMode[], defaultView: ViewMode) {
@@ -90,6 +86,13 @@ function filterResponsesByTeam(responses: ResponseRecord[], activeTeamFilter: st
 }
 
 export async function GET(request: NextRequest) {
+  const auditContext = createAuditContext(request);
+  const rateLimit = applyRateLimit(`responses:get:${auditContext.ip}`, 120, 60 * 1000);
+
+  if (!rateLimit.allowed) {
+    return NextResponse.json({ error: "Muitas requisições." }, { status: 429 });
+  }
+
   const url = new URL(request.url);
   const viewKey = url.searchParams.get("viewKey");
   const memberToken = url.searchParams.get("memberToken");
@@ -169,7 +172,12 @@ export async function GET(request: NextRequest) {
   }
 
   if (accessToken) {
-    const tokenData = await validateToken(accessToken.trim().toUpperCase(), { tokenType: "company" });
+    const parsedAccessToken = tokenSchema.safeParse(accessToken);
+    if (!parsedAccessToken.success) {
+      return NextResponse.json({ error: "Token de análise inválido" }, { status: 401 });
+    }
+
+    const tokenData = await validateToken(parsedAccessToken.data, { tokenType: "company" });
     if (!tokenData) {
       return NextResponse.json({ error: "Token de análise inválido" }, { status: 401 });
     }
@@ -192,7 +200,12 @@ export async function GET(request: NextRequest) {
   }
 
   if (viewKey && memberToken) {
-    const tokenData = await validateToken(memberToken.trim().toUpperCase(), {
+    const parsedMemberToken = tokenSchema.safeParse(memberToken);
+    if (!parsedMemberToken.success) {
+      return NextResponse.json({ error: "Acesso individual inválido" }, { status: 401 });
+    }
+
+    const tokenData = await validateToken(parsedMemberToken.data, {
       tokenType: "member",
       allowUsed: true,
     });
@@ -231,21 +244,16 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: Request) {
+  const auditContext = createAuditContext(request);
+  const rateLimit = applyRateLimit(`responses:post:${auditContext.ip}`, 30, 10 * 60 * 1000);
+
+  if (!rateLimit.allowed) {
+    auditLog("warn", "response.submit.rate_limited", auditContext);
+    return NextResponse.json({ error: "Muitas tentativas. Aguarde antes de tentar novamente." }, { status: 429 });
+  }
+
   try {
-    const body = await request.json();
-    const { answers, team, role, token, triage } = body as {
-      answers: Answer[];
-      team?: string;
-      role?: string;
-      token?: string;
-      triage?: TriageData;
-    };
-
-    if (!token) {
-      return NextResponse.json({ error: "Token obrigatório" }, { status: 401 });
-    }
-
-    const tokenValue = String(token).trim().toUpperCase();
+    const { answers, team, role, token: tokenValue, triage } = submitResponseSchema.parse(await request.json());
     const genericToken = await validateToken(tokenValue, { allowUsed: true });
     if (genericToken?.token.tokenType === "company") {
       return NextResponse.json(
@@ -257,43 +265,42 @@ export async function POST(request: Request) {
     const tokenData = await validateToken(tokenValue, { tokenType: "member" });
 
     if (!tokenData) {
+      auditLog("warn", "response.submit.invalid_token", {
+        ...auditContext,
+        tokenSuffix: tokenValue.slice(-4),
+      });
       return NextResponse.json({ error: "Token individual inválido ou já utilizado" }, { status: 401 });
-    }
-
-    const questionIds = new Set(questions.map((question) => question.id));
-    if (!Array.isArray(answers) || answers.length !== questions.length) {
-      return NextResponse.json({ error: "Responda todas as perguntas da escala." }, { status: 400 });
-    }
-
-    const invalid = answers.some((answer) => {
-      const inRange = [1, 2, 3, 4, 5].includes(answer.value);
-      return !questionIds.has(answer.questionId) || !inRange;
-    });
-
-    if (invalid) {
-      return NextResponse.json({ error: "Respostas inválidas ou pergunta desconhecida." }, { status: 400 });
     }
 
     const normalizedAnswers = answers.map((answer) => ({
       questionId: answer.questionId,
-      value: Number(answer.value) as LikertValue,
+      value: answer.value as LikertValue,
     }));
 
     const record: ResponseRecord = {
       id: randomUUID(),
       submittedAt: new Date().toISOString(),
       answers: normalizedAnswers,
-      team: team?.slice(0, 60),
-      role: role?.slice(0, 60),
+      team,
+      role,
       companyId: tokenData.company.id,
       triage,
     };
 
     await saveResponse(record);
     await consumeToken(tokenValue, record.id);
+    auditLog("info", "response.submit", {
+      ...auditContext,
+      companyId: tokenData.company.id,
+      responseId: record.id,
+    });
 
     return NextResponse.json({ viewKey: record.id, memberToken: tokenValue });
   } catch (error) {
+    if (error instanceof Error && error.name === "ZodError") {
+      return NextResponse.json({ error: getValidationMessage(error as never) }, { status: 400 });
+    }
+
     console.error("Erro ao salvar resposta", error);
     return NextResponse.json({ error: "Falha ao salvar resposta" }, { status: 500 });
   }
