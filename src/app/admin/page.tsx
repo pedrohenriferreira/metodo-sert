@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ComponentType, ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, ArrowUpRight, Building2, LogOut, Plus, Shield, Siren, Trash2, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -74,6 +74,26 @@ type CompaniesResponse = {
   companies: CompanyRow[];
 };
 
+async function requestCompanies(retryCount = 0): Promise<{ ok: true; companies: CompanyRow[] } | { ok: false }> {
+  const res = await fetch("/api/companies", {
+    credentials: "include",
+  });
+
+  if (!res.ok) {
+    // Right after login the browser may not attach the fresh cookie on the
+    // first follow-up request yet, so retry once before dropping the session.
+    if (res.status === 401 && retryCount < 1) {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      return requestCompanies(retryCount + 1);
+    }
+
+    return { ok: false as const };
+  }
+
+  const data = (await res.json()) as CompaniesResponse;
+  return { ok: true as const, companies: data.companies };
+}
+
 export default function AdminPage() {
   const router = useRouter();
   const [user, setUser] = useState("admin");
@@ -125,14 +145,7 @@ export default function AdminPage() {
   const criticalCount = alerts.filter((alert) => alert.riskBand === "Crítico").length;
   const highAttentionCount = alerts.filter((alert) => alert.riskBand === "Atenção alta").length;
 
-  async function fetchCompanies() {
-    const res = await fetch("/api/companies");
-    if (!res.ok) {
-      return { ok: false as const };
-    }
-    const data = (await res.json()) as CompaniesResponse;
-    return { ok: true as const, companies: data.companies };
-  }
+  const fetchCompanies = useCallback(() => requestCompanies(), []);
 
   async function loadCompanies() {
     setStatus("Carregando...");
@@ -176,13 +189,14 @@ export default function AdminPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [fetchCompanies]);
 
   async function login() {
     setAuthError(null);
     setLoading(true);
     const res = await fetch("/api/admin/login", {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ user, password }),
     });
@@ -199,7 +213,7 @@ export default function AdminPage() {
   }
 
   async function logout() {
-    await fetch("/api/admin/logout", { method: "POST" });
+    await fetch("/api/admin/logout", { method: "POST", credentials: "include" });
     setAuthed(false);
     setCompanies([]);
   }
@@ -208,6 +222,7 @@ export default function AdminPage() {
     setStatus("Gerando tokens...");
     const res = await fetch("/api/companies", {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: companyName, seats }),
     });
@@ -238,6 +253,7 @@ export default function AdminPage() {
 
     const res = await fetch("/api/companies", {
       method: "DELETE",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ companyId: company.id }),
     });
@@ -265,6 +281,7 @@ export default function AdminPage() {
 
     const res = await fetch("/api/companies", {
       method: "DELETE",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ responseId }),
     });
