@@ -184,15 +184,32 @@ export function auditLog(level: AuditLevel, action: string, details: Record<stri
 
   if (level === "error") {
     console.error("[audit]", JSON.stringify(payload));
-    return;
-  }
-
-  if (level === "warn") {
+  } else if (level === "warn") {
     console.warn("[audit]", JSON.stringify(payload));
-    return;
+  } else {
+    console.info("[audit]", JSON.stringify(payload));
   }
 
-  console.info("[audit]", JSON.stringify(payload));
+  void import("@/lib/audit-store")
+    .then(({ persistAuditEvent }) =>
+      persistAuditEvent({
+        level,
+        action,
+        actorType: typeof details.principal === "string" ? details.principal : undefined,
+        actorId:
+          typeof details.user === "string"
+            ? details.user
+            : typeof details.sessionId === "string"
+              ? details.sessionId
+              : undefined,
+        ip: typeof details.ip === "string" ? details.ip : undefined,
+        path: typeof details.path === "string" ? details.path : undefined,
+        details,
+      })
+    )
+    .catch((error) => {
+      console.error("[audit-import-failed]", error);
+    });
 }
 
 export function getSessionCookieName() {

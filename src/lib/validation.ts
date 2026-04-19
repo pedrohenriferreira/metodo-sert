@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { getConsentVersion } from "@/lib/governance";
 import { questions } from "@/lib/questions";
 
 const questionIds = new Set(questions.map((question) => question.id));
@@ -107,6 +108,10 @@ export const submitResponseSchema = z
     role: boundedTextSchema.optional(),
     token: tokenSchema,
     triage: triageSchema.optional(),
+    consentAccepted: z
+      .boolean()
+      .refine((value) => value === true, "É necessário registrar o consentimento para continuar."),
+    consentVersion: z.string().trim().min(1).max(32).default(getConsentVersion()),
   })
   .strict()
   .superRefine((value, ctx) => {

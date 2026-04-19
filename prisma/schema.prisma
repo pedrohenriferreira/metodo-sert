@@ -32,17 +32,36 @@ model Token {
 }
 
 model Response {
-  id          String    @id
-  submittedAt DateTime
-  answers     Json
-  team        String?
-  role        String?
-  companyId   String?
-  triage      Json?
-  company     Company?  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  token       Token?
+  id                String    @id
+  pseudonymId       String?   @unique
+  submittedAt       DateTime
+  answers           Json
+  team              String?
+  role              String?
+  companyId         String?
+  triage            Json?
+  consent           Json?
+  legalBasis        String?
+  retentionUntil    DateTime?
+  company           Company?  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  token             Token?
 
   @@index([companyId])
+}
+
+model AuditEvent {
+  id        String   @id
+  createdAt DateTime
+  level     String
+  action    String
+  actorType String?
+  actorId   String?
+  ip        String?
+  path      String?
+  details   Json?
+
+  @@index([createdAt])
+  @@index([action])
 }
 
 enum TokenType {

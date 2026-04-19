@@ -1,6 +1,7 @@
 "use client";
 
-import { Suspense, useCallback, useMemo, useState } from "react";
+import Link from "next/link";
+import { Suspense, useCallback, useEffect, useMemo, useState, startTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Activity, HeartPulse, ShieldCheck, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +11,7 @@ import { Field } from "@/components/ui/field";
 import { Form } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { getConsentDisclosureText, getConsentVersion } from "@/lib/governance";
 import { Dimension, questions } from "@/lib/questions";
 import { cn } from "@/lib/utils";
 
@@ -80,6 +82,24 @@ const triageTopics = [
   },
 ];
 
+const FORM_ACCESS_SESSION_KEY = "metodo-sert:validated-member-token";
+const INITIAL_ANSWERS: AnswersState = Object.fromEntries(questions.map((q) => [q.id, 3]));
+const INITIAL_TRIAGE: TriageForm = {
+  workModel: "",
+  shift: "",
+  tenureMonths: 0,
+  area: "",
+  leadership: "",
+  publicExposure: "",
+  recentOverload: "",
+  sleepQuality: "",
+  weeklyHours: 40,
+  energyLevel: "",
+  emotionalPressure: "",
+  motivationLevel: "",
+  socialIsolation: "",
+};
+
 export default function FormPage() {
   return (
     <Suspense fallback={<FormLoadingState />}>
@@ -91,34 +111,66 @@ export default function FormPage() {
 function FormContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const [answers, setAnswers] = useState<AnswersState>(() =>
-    Object.fromEntries(questions.map((q) => [q.id, 3]))
-  );
-  const [token, setToken] = useState(() => searchParams.get("token") ?? "");
+  const tokenFromQuery = searchParams.get("token") ?? "";
+  const stepParam = searchParams.get("step") ?? "token";
+  const requestedStep =
+    stepParam === "legal" || stepParam === "triage" || stepParam === "form" ? stepParam : "token";
+  const [answers, setAnswers] = useState<AnswersState>(() => ({ ...INITIAL_ANSWERS }));
+  const [token, setToken] = useState(() => tokenFromQuery);
   const [companyName, setCompanyName] = useState<string | null>(null);
   const [tokenValidated, setTokenValidated] = useState(false);
-  const [phase, setPhase] = useState<"token" | "triage" | "form">("token");
+  const [phase, setPhase] = useState<"token" | "legal" | "triage" | "form">(
+    tokenFromQuery && requestedStep !== "token" ? requestedStep : "token"
+  );
   const [team, setTeam] = useState("");
   const [role, setRole] = useState("");
   const [tenureUnit, setTenureUnit] = useState<"months" | "years">("months");
   const [tenureValue, setTenureValue] = useState("");
-  const [triage, setTriage] = useState<TriageForm>({
-    workModel: "",
-    shift: "",
-    tenureMonths: 0,
-    area: "",
-    leadership: "",
-    publicExposure: "",
-    recentOverload: "",
-    sleepQuality: "",
-    weeklyHours: 40,
-    energyLevel: "",
-    emotionalPressure: "",
-    motivationLevel: "",
-    socialIsolation: "",
-  });
+  const [triage, setTriage] = useState<TriageForm>({ ...INITIAL_TRIAGE });
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [consentAccepted, setConsentAccepted] = useState(false);
+  const [hydratingToken, setHydratingToken] = useState(false);
+  const [redirectingToDashboard, setRedirectingToDashboard] = useState(false);
+
+  const consentDisclosure = getConsentDisclosureText();
+  const consentVersion = getConsentVersion();
+
+  const persistValidatedToken = useCallback((validatedToken: string) => {
+    if (typeof window === "undefined") return;
+    window.sessionStorage.setItem(FORM_ACCESS_SESSION_KEY, validatedToken);
+  }, []);
+
+  const clearValidatedToken = useCallback(() => {
+    if (typeof window === "undefined") return;
+    window.sessionStorage.removeItem(FORM_ACCESS_SESSION_KEY);
+  }, []);
+
+  const resetAssessmentState = useCallback(() => {
+    setAnswers({ ...INITIAL_ANSWERS });
+    setTeam("");
+    setRole("");
+    setTenureUnit("months");
+    setTenureValue("");
+    setTriage({ ...INITIAL_TRIAGE });
+    setConsentAccepted(false);
+  }, []);
+
+  const setFormUrlState = useCallback(
+    (nextStep: "token" | "legal" | "triage" | "form", nextToken: string) => {
+      const params = new URLSearchParams();
+      if (nextToken) {
+        params.set("token", nextToken);
+      }
+      if (nextStep !== "token") {
+        params.set("step", nextStep);
+      }
+
+      const query = params.toString();
+      router.replace(query ? `/form?${query}` : "/form");
+    },
+    [router]
+  );
 
   const validateCurrentToken = useCallback(async (value?: string) => {
     const tokenValue = (value ?? token).trim();
@@ -128,35 +180,144 @@ function FormContent() {
       return;
     }
 
-    const response = await fetch("/api/tokens/validate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: tokenValue }),
-    });
+    try {
+      const response = await fetch("/api/tokens/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: tokenValue }),
+      });
 
-    const data = (await response.json()) as TokenValidation;
-    if (!response.ok || !data.valid) {
-      setStatus(data.error ?? "Token inválido ou já utilizado.");
+      const data = (await response.json()) as TokenValidation;
+      if (!response.ok || !data.valid) {
+        setStatus(data.error ?? "Token inválido ou já utilizado.");
+        setCompanyName(null);
+        setTokenValidated(false);
+        return;
+      }
+
+      if (data.token?.tokenType === "company") {
+        setCompanyName(data.company?.name ?? null);
+        setTokenValidated(false);
+        setStatus(`Token institucional validado para ${data.company?.name ?? "empresa"}. Abrindo visão empresa...`);
+        router.push(`/dashboard?accessToken=${tokenValue}`);
+        return;
+      }
+
+      setCompanyName(data.company?.name ?? null);
+      resetAssessmentState();
+      setTokenValidated(true);
+      persistValidatedToken(tokenValue);
+      setStatus(
+        `Token individual válido para ${data.company?.name ?? "empresa"} · revise os termos para seguir com a triagem. Saldo ${data.remaining}/${data.total}`
+      );
+      setPhase("legal");
+      setFormUrlState("legal", tokenValue);
+    } catch {
+      setStatus("Não foi possível validar o token agora. Verifique sua conexão e tente novamente.");
       setCompanyName(null);
       setTokenValidated(false);
+    }
+  }, [persistValidatedToken, resetAssessmentState, router, setFormUrlState, token]);
+
+  useEffect(() => {
+    setToken(tokenFromQuery);
+  }, [tokenFromQuery]);
+
+  useEffect(() => {
+    if (redirectingToDashboard) {
       return;
     }
 
-    if (data.token?.tokenType === "company") {
-      setCompanyName(data.company?.name ?? null);
-      setTokenValidated(false);
-      setStatus(`Token institucional validado para ${data.company?.name ?? "empresa"}. Abrindo visão empresa...`);
-      router.push(`/dashboard?accessToken=${tokenValue}`);
+    if (requestedStep !== "token") {
+      const storedToken =
+        typeof window !== "undefined" ? window.sessionStorage.getItem(FORM_ACCESS_SESSION_KEY) : null;
+
+      if (!storedToken || storedToken !== token) {
+        setToken("");
+        resetAssessmentState();
+        setTokenValidated(false);
+        setCompanyName(null);
+        setPhase("token");
+        setStatus("Valide o token novamente para continuar com segurança.");
+        setFormUrlState("token", "");
+        return;
+      }
+    }
+
+    if (!token || requestedStep === "token" || tokenValidated) {
       return;
     }
 
-    setCompanyName(data.company?.name ?? null);
-    setTokenValidated(true);
-    setStatus(
-      `Token individual válido para ${data.company?.name ?? "empresa"} · sua resposta abrirá apenas a sua visão individual. Saldo ${data.remaining}/${data.total}`
-    );
-    setPhase("triage");
-  }, [router, token]);
+    let cancelled = false;
+
+    async function hydrateValidatedToken() {
+      setHydratingToken(true);
+
+      try {
+        const response = await fetch("/api/tokens/validate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token }),
+        });
+
+        const data = (await response.json()) as TokenValidation;
+        if (cancelled) return;
+
+        if (!response.ok || !data.valid || data.token?.tokenType !== "member") {
+          setStatus(data.error ?? "Token inválido ou já utilizado.");
+          setCompanyName(null);
+          resetAssessmentState();
+          setTokenValidated(false);
+          clearValidatedToken();
+          setPhase("token");
+          setFormUrlState("token", "");
+          return;
+        }
+
+        setCompanyName(data.company?.name ?? null);
+        setTokenValidated(true);
+
+        if (requestedStep === "legal") {
+          resetAssessmentState();
+          setPhase("legal");
+          setStatus(
+            `Token individual válido para ${data.company?.name ?? "empresa"} · revise os termos para seguir com a triagem. Saldo ${data.remaining}/${data.total}`
+          );
+          return;
+        }
+
+        if (requestedStep === "triage") {
+          resetAssessmentState();
+          setConsentAccepted(true);
+          setPhase("triage");
+          return;
+        }
+
+        if (requestedStep === "form") {
+          resetAssessmentState();
+          setConsentAccepted(true);
+          setPhase("form");
+        }
+      } catch {
+        if (cancelled) return;
+        setStatus("Não foi possível restaurar seu acesso. Valide o token novamente.");
+        clearValidatedToken();
+        resetAssessmentState();
+        setPhase("token");
+        setFormUrlState("token", "");
+      } finally {
+        if (!cancelled) {
+          setHydratingToken(false);
+        }
+      }
+    }
+
+    void hydrateValidatedToken();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [clearValidatedToken, redirectingToDashboard, requestedStep, resetAssessmentState, setFormUrlState, token, tokenValidated]);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -169,6 +330,12 @@ function FormContent() {
       return;
     }
 
+    if (!consentAccepted) {
+      setLoading(false);
+      setStatus("É necessário registrar o consentimento para concluir o envio.");
+      return;
+    }
+
     const payload = {
       answers: questions.map((q) => ({
         questionId: q.id,
@@ -178,27 +345,36 @@ function FormContent() {
       role,
       token,
       triage,
+      consentAccepted,
+      consentVersion,
     };
 
-    const response = await fetch("/api/responses", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+    try {
+      const response = await fetch("/api/responses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
 
-    if (!response.ok) {
-      const error = await response.json();
-      setStatus(error?.error ?? "Não foi possível salvar. Tente novamente.");
+      if (!response.ok) {
+        const error = await response.json();
+        setStatus(error?.error ?? "Não foi possível salvar. Tente novamente.");
+        setLoading(false);
+        return;
+      }
+
+      const data = (await response.json()) as SubmitResponse;
+      setStatus("Resposta enviada. Redirecionando para o dashboard...");
       setLoading(false);
-      return;
+      setRedirectingToDashboard(true);
+      clearValidatedToken();
+      startTransition(() => {
+        router.push(`/dashboard?view=${data.viewKey}&memberToken=${data.memberToken}`);
+      });
+    } catch {
+      setStatus("Falha de rede ao enviar a resposta. Tente novamente em instantes.");
+      setLoading(false);
     }
-
-    const data = (await response.json()) as SubmitResponse;
-    setStatus("Resposta enviada. Redirecionando para o dashboard...");
-    setTokenValidated(false);
-    setCompanyName(null);
-    setLoading(false);
-    router.push(`/dashboard?view=${data.viewKey}&memberToken=${data.memberToken}`);
   }
 
   const triageReady =
@@ -290,20 +466,30 @@ function FormContent() {
 
           <div className="mx-auto flex w-full max-w-6xl flex-col items-center space-y-8">
             <div className="w-full">
-              <div className="grid grid-cols-3 gap-4 text-left">
+              <div className="grid grid-cols-4 gap-4 text-left">
                 <StepBadge index={1} current={phase === "token"}>Token</StepBadge>
-                <StepBadge index={2} current={phase === "triage"}>Triagem ampliada</StepBadge>
-                <StepBadge index={3} current={phase === "form"}>Escala</StepBadge>
+                <StepBadge index={2} current={phase === "legal"}>Termos</StepBadge>
+                <StepBadge index={3} current={phase === "triage"}>Triagem ampliada</StepBadge>
+                <StepBadge index={4} current={phase === "form"}>Escala</StepBadge>
               </div>
               <div className="mt-4 h-1.5 rounded-full bg-[rgba(136,163,191,0.16)]">
                 <div
                   className="h-full rounded-full bg-[var(--primary)] transition-all"
-                  style={{ width: phase === "token" ? "20%" : phase === "triage" ? "58%" : "100%" }}
+                  style={{
+                    width:
+                      phase === "token"
+                        ? "18%"
+                        : phase === "legal"
+                          ? "42%"
+                          : phase === "triage"
+                            ? "72%"
+                            : "100%",
+                  }}
                 />
               </div>
             </div>
 
-            {!tokenValidated && (
+            {!tokenValidated && !hydratingToken && phase === "token" && (
               <Card className="mx-auto w-full max-w-[34rem] px-2 py-3 shadow-[0_22px_60px_rgba(129,155,179,0.14)]">
                 <CardHeader className="space-y-5 text-center">
                   <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[rgba(106,161,160,0.12)] text-[var(--primary)]">
@@ -312,7 +498,7 @@ function FormContent() {
                   <div>
                     <CardTitle className="text-4xl tracking-[-0.05em]">Acesso Seguro</CardTitle>
                     <CardDescription className="mx-auto mt-3 max-w-md text-base leading-7">
-                      Seu preenchimento é 100% anônimo e protegido. Informe o token fornecido pela sua empresa.
+                      Seu preenchimento é protegido. Informe o token fornecido pela sua empresa para iniciar o fluxo.
                     </CardDescription>
                   </div>
                   <div className="flex justify-center">
@@ -331,7 +517,7 @@ function FormContent() {
                     <Input
                       id="token"
                       value={token}
-                      onChange={(e) => setToken(e.target.value.toUpperCase())}
+                    onChange={(e) => setToken(e.target.value.toUpperCase())}
                       placeholder="Ex: USR-1234"
                       className="text-center uppercase tracking-[0.16em] placeholder:tracking-[0.08em]"
                     />
@@ -349,10 +535,88 @@ function FormContent() {
                 </CardContent>
               </Card>
             )}
+
+            {hydratingToken && requestedStep !== "token" && (
+              <Card className="mx-auto w-full max-w-[34rem] px-2 py-3 shadow-[0_22px_60px_rgba(129,155,179,0.14)]">
+                <CardContent className="p-6 text-center text-sm text-[var(--muted-foreground)]">
+                  Restaurando a etapa atual com o token validado...
+                </CardContent>
+              </Card>
+            )}
           </div>
         </section>
 
         <section className="mt-10">
+          {phase === "legal" && tokenValidated && (
+            <Card className="overflow-hidden">
+              <CardHeader className="border-b border-[var(--border)]/60 pb-6">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                  <div>
+                    <p className="hero-pill w-fit">
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                      Termos e privacidade
+                    </p>
+                    <CardTitle className="mt-5 text-3xl tracking-[-0.04em]">Revisão legal antes da triagem</CardTitle>
+                    <CardDescription className="mt-3 max-w-3xl text-base leading-7">
+                      Seu token individual foi validado para {companyName ?? "a empresa"}. Antes de continuar,
+                      revise os termos de uso e a política de privacidade aplicáveis.
+                    </CardDescription>
+                  </div>
+                  <Badge variant="outline">Etapa obrigatória</Badge>
+                </div>
+              </CardHeader>
+
+              <CardContent className="space-y-6 pt-8">
+                <div className="rounded-[1.6rem] border border-[var(--border)] bg-[rgba(255,255,255,0.88)] p-5">
+                  <p className="text-sm font-semibold text-[var(--foreground)]">Consentimento e ciência de tratamento</p>
+                  <p className="mt-3 text-sm leading-7 text-[var(--muted-foreground)]">{consentDisclosure}</p>
+                  <p className="mt-3 text-xs font-mono uppercase tracking-[0.16em] text-[var(--muted-foreground)]">
+                    Versão do termo: {consentVersion}
+                  </p>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Link
+                    href={token ? `/termos-de-uso?token=${encodeURIComponent(token)}` : "/termos-de-uso"}
+                    className="rounded-[1.4rem] border border-[var(--border)] bg-white px-5 py-5 text-left shadow-[0_12px_24px_rgba(129,155,179,0.08)] transition-colors hover:bg-[var(--accent)]"
+                  >
+                    <p className="text-base font-semibold text-[var(--foreground)]">Ler Termos de Uso</p>
+                    <p className="mt-2 text-sm leading-6 text-[var(--muted-foreground)]">
+                      Regras de utilização da plataforma, acesso e responsabilidades.
+                    </p>
+                  </Link>
+                  <Link
+                    href={
+                      token
+                        ? `/politica-de-privacidade?token=${encodeURIComponent(token)}`
+                        : "/politica-de-privacidade"
+                    }
+                    className="rounded-[1.4rem] border border-[var(--border)] bg-white px-5 py-5 text-left shadow-[0_12px_24px_rgba(129,155,179,0.08)] transition-colors hover:bg-[var(--accent)]"
+                  >
+                    <p className="text-base font-semibold text-[var(--foreground)]">Ler Política de Privacidade</p>
+                    <p className="mt-2 text-sm leading-6 text-[var(--muted-foreground)]">
+                      Finalidade, retenção, direitos do titular e proteção dos dados.
+                    </p>
+                  </Link>
+                </div>
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+                  <Button
+                    size="lg"
+                    onClick={() => {
+                      setConsentAccepted(true);
+                      setPhase("triage");
+                      setFormUrlState("triage", token);
+                      setStatus(null);
+                    }}
+                  >
+                    Li e concordo para continuar
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {phase === "triage" && tokenValidated && (
             <Card className="overflow-hidden">
               <CardHeader className="border-b border-[var(--border)]/60 pb-6">
@@ -565,6 +829,7 @@ function FormContent() {
                       return;
                     }
                     setPhase("form");
+                    setFormUrlState("form", token);
                     setStatus(null);
                   }}
                   className="w-full sm:w-auto"
@@ -680,9 +945,22 @@ function FormContent() {
                   </div>
 
                   <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                    <p className="max-w-2xl text-sm leading-7 text-[var(--muted-foreground)]">
+                    <div className="max-w-3xl space-y-4">
+                      <p className="text-sm leading-7 text-[var(--muted-foreground)]">
                       Ao enviar, você libera uma leitura individual e uma visão agregada para a empresa.
                     </p>
+                      <div className="rounded-[1.35rem] border border-[var(--border)] bg-[rgba(255,255,255,0.88)] px-4 py-4 text-left">
+                        <p className="text-sm font-semibold text-[var(--foreground)]">
+                          Termos aceitos antes da triagem
+                        </p>
+                        <p className="mt-2 text-sm leading-6 text-[var(--muted-foreground)]">
+                          {consentDisclosure}
+                        </p>
+                        <p className="mt-2 text-xs font-mono uppercase tracking-[0.16em] text-[var(--muted-foreground)]">
+                          Versão do termo: {consentVersion}
+                        </p>
+                      </div>
+                    </div>
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                       <Button type="button" variant="outline" onClick={() => setPhase("triage")}>
                         Voltar para triagem

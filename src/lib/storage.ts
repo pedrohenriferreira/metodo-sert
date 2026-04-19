@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { TokenType as PrismaTokenType, Prisma } from "@prisma/client";
+import { buildPseudonymId, ConsentRecord } from "@/lib/governance";
 import { questions } from "@/lib/questions";
 import { prisma } from "@/lib/prisma";
 
@@ -33,12 +34,16 @@ export type Company = {
 
 export type ResponseRecord = {
   id: string;
+  pseudonymId?: string;
   submittedAt: string;
   answers: Answer[];
   team?: string;
   role?: string;
   companyId?: string;
   triage?: TriageData;
+  consent?: ConsentRecord;
+  legalBasis?: string;
+  retentionUntil?: string;
 };
 
 export type TriageData = {
@@ -107,12 +112,16 @@ function toTriageData(value: Prisma.JsonValue | null): TriageData | undefined {
 function toResponse(record: PrismaResponse): ResponseRecord {
   return {
     id: record.id,
+    pseudonymId: record.pseudonymId ?? undefined,
     submittedAt: record.submittedAt.toISOString(),
     answers: isAnswerArray(record.answers) ? record.answers : [],
     team: record.team ?? undefined,
     role: record.role ?? undefined,
     companyId: record.companyId ?? undefined,
     triage: toTriageData(record.triage),
+    consent: (record.consent as ConsentRecord | null) ?? undefined,
+    legalBasis: record.legalBasis ?? undefined,
+    retentionUntil: record.retentionUntil?.toISOString(),
   };
 }
 
@@ -150,16 +159,26 @@ export async function saveResponse(response: ResponseRecord) {
   const triage = response.triage
     ? (response.triage as unknown as Prisma.InputJsonValue)
     : Prisma.JsonNull;
+  const consent = response.consent
+    ? (response.consent as unknown as Prisma.InputJsonValue)
+    : Prisma.JsonNull;
+  const pseudonymId =
+    response.pseudonymId ??
+    (response.companyId ? buildPseudonymId(response.id, response.companyId) : undefined);
 
   await prisma.response.create({
     data: {
       id: response.id,
+      pseudonymId,
       submittedAt: new Date(response.submittedAt),
       answers: sanitizedAnswers as unknown as Prisma.InputJsonValue,
       team: response.team?.trim() || null,
       role: response.role?.trim() || null,
       companyId: response.companyId ?? null,
       triage,
+      consent,
+      legalBasis: response.legalBasis ?? null,
+      retentionUntil: response.retentionUntil ? new Date(response.retentionUntil) : null,
     },
   });
 }

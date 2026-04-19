@@ -16,8 +16,12 @@ npm run dev
 DATABASE_URL="postgresql://postgres.SEU-PROJECT-REF:SUA-SENHA@aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require"
 DIRECT_URL="postgresql://postgres:SUA-SENHA@db.SEU-PROJECT-REF.supabase.co:5432/postgres?sslmode=require"
 ADMIN_KEY=escolha-uma-chave-forte
+ADMIN_SESSION_SECRET=gere-um-segredo-longo-e-aleatorio
 ADMIN_USER=admin
 ADMIN_PASS=senha-forte
+DATA_RETENTION_DAYS=180
+LEGAL_BASIS_LABEL=legitimo_interesse_nr1
+CONSENT_VERSION=2026-04
 ```
 
 ## Banco de dados
@@ -29,6 +33,10 @@ ADMIN_PASS=senha-forte
 - Aplicar o schema no PostgreSQL:
 ```bash
 npm run db:push
+```
+- Regenerar o client do Prisma quando o schema mudar:
+```bash
+npx prisma generate
 ```
 - Importar os dados atuais dos arquivos JSON para o banco:
 ```bash
@@ -55,9 +63,11 @@ curl -X POST http://localhost:3000/api/tokens/validate \
 ## Fluxo de coleta
 - Landing redireciona para `/form`.
 - Primeiro valida-se o token (tela dedicada). Só depois o formulário aparece.
+- Antes do envio, o colaborador registra consentimento e ciência do tratamento.
 - Ao enviar, o token é consumido e o usuário é redirecionado para `/dashboard?view=<id_da_resposta>`.
 - Dashboard: `/dashboard` só responde se receber `view` válido (ou `x-admin-key` para uso interno).
 - Respostas, empresas e tokens ficam persistidos em PostgreSQL.
+- Exportação operacional: `GET /api/reports/company` gera CSV pseudonimizado.
 
 ## Estrutura principal
 - `src/app/page.tsx`: redireciona para `/form`.
@@ -66,11 +76,15 @@ curl -X POST http://localhost:3000/api/tokens/validate \
 - `src/app/admin/page.tsx`: painel protegido para gerar empresas/tokens.
 - `src/app/api/responses/route.ts`: grava respostas, valida token, calcula métricas.
 - `src/app/api/tokens/validate/route.ts`: valida tokens.
+- `src/app/api/reports/company/route.ts`: exporta relatório pseudonimizado da empresa.
+- `src/app/api/health/route.ts`: healthcheck da aplicação e do banco.
 - `src/app/api/companies/route.ts`: criação e listagem (chave admin).
 - `src/app/api/admin/login|logout`: autenticação de sessão admin.
 - `src/lib/questions.ts`: itens da escala.
 - `src/lib/metrics.ts`: cálculo de médias por dimensão e pergunta.
-- `src/lib/storage.ts`: persistência em arquivos JSON, geração/uso de tokens.
+- `src/lib/storage.ts`: persistência em PostgreSQL, geração/uso de tokens.
+- `docs/GOVERNANCA_DADOS.md`: diretrizes de LGPD, retenção e acesso.
+- `docs/OPERACAO_PRODUTO.md`: onboarding e rotina operacional.
 
 ## Próximos passos sugeridos
 1. Adicionar migrations versionadas e pipeline de banco para produção.

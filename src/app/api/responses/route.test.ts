@@ -48,6 +48,8 @@ describe("/api/responses", () => {
     const response = await POST(
       makeRequest({
         token: "company-token",
+        consentAccepted: true,
+        consentVersion: "2026-04",
         answers: questions.map((question) => ({ questionId: question.id, value: 3 })),
       })
     );
@@ -74,6 +76,8 @@ describe("/api/responses", () => {
         token: "member-token",
         team: "Financeiro",
         role: "Analista",
+        consentAccepted: true,
+        consentVersion: "2026-04",
         answers: questions.map((question) => ({ questionId: question.id, value: 4 })),
       })
     );
@@ -91,6 +95,8 @@ describe("/api/responses", () => {
     const response = await POST(
       makeRequest({
         token: "member-token",
+        consentAccepted: false,
+        consentVersion: "2026-04",
         answers: [],
       })
     );

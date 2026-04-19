@@ -1,5 +1,11 @@
 import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
+import {
+  buildPseudonymId,
+  calculateRetentionUntil,
+  getConsentDisclosureText,
+  getLegalBasisLabel,
+} from "@/lib/governance";
 import { buildDashboardPayload, summarizeResponseRisk, ViewMode } from "@/lib/metrics";
 import { captureServerError } from "@/lib/observability";
 import { applyRateLimit, auditLog, createAuditContext, getAdminPrincipal } from "@/lib/security";
@@ -254,7 +260,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { answers, team, role, token: tokenValue, triage } = submitResponseSchema.parse(await request.json());
+    const { answers, team, role, token: tokenValue, triage, consentAccepted, consentVersion } = submitResponseSchema.parse(await request.json());
     const genericToken = await validateToken(tokenValue, { allowUsed: true });
     if (genericToken?.token.tokenType === "company") {
       return NextResponse.json(
@@ -277,15 +283,28 @@ export async function POST(request: Request) {
       questionId: answer.questionId,
       value: answer.value as LikertValue,
     }));
+    const responseId = randomUUID();
+    const retentionUntil = calculateRetentionUntil(new Date().toISOString());
 
     const record: ResponseRecord = {
-      id: randomUUID(),
+      id: responseId,
+      pseudonymId: buildPseudonymId(responseId, tokenData.company.id),
       submittedAt: new Date().toISOString(),
       answers: normalizedAnswers,
       team,
       role,
       companyId: tokenData.company.id,
       triage,
+      consent: consentAccepted
+        ? {
+            accepted: true,
+            acceptedAt: new Date().toISOString(),
+            version: consentVersion,
+            text: getConsentDisclosureText(),
+          }
+        : undefined,
+      legalBasis: getLegalBasisLabel(),
+      retentionUntil,
     };
 
     await saveResponse(record);
@@ -294,6 +313,8 @@ export async function POST(request: Request) {
       ...auditContext,
       companyId: tokenData.company.id,
       responseId: record.id,
+      pseudonymId: record.pseudonymId,
+      retentionUntil,
     });
 
     return NextResponse.json({ viewKey: record.id, memberToken: tokenValue });

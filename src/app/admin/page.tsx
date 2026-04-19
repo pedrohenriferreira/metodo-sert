@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ComponentType, ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, ArrowUpRight, Building2, LogOut, Plus, Shield, Siren, Trash2, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -74,28 +74,60 @@ type CompaniesResponse = {
   companies: CompanyRow[];
 };
 
-async function requestCompanies(retryCount = 0): Promise<{ ok: true; companies: CompanyRow[] } | { ok: false }> {
-  const res = await fetch("/api/companies", {
-    credentials: "include",
-  });
+type RequestCompaniesResult =
+  | { ok: true; companies: CompanyRow[] }
+  | { ok: false; error: string };
 
-  if (!res.ok) {
-    // Right after login the browser may not attach the fresh cookie on the
-    // first follow-up request yet, so retry once before dropping the session.
-    if (res.status === 401 && retryCount < 1) {
-      await new Promise((resolve) => setTimeout(resolve, 150));
-      return requestCompanies(retryCount + 1);
+async function requestCompanies(retryCount = 0): Promise<RequestCompaniesResult> {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+
+  try {
+    const res = await fetch("/api/companies", {
+      credentials: "include",
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      // Right after login the browser may not attach the fresh cookie on the
+      // first follow-up request yet, so retry once before dropping the session.
+      if (res.status === 401 && retryCount < 1) {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        return requestCompanies(retryCount + 1);
+      }
+
+      if (res.status >= 500) {
+        return {
+          ok: false as const,
+          error: "O painel conseguiu autenticar, mas nao conseguiu consultar a base de dados da administracao.",
+        };
+      }
+
+      return { ok: false as const, error: "Sua sessao administrativa nao foi reconhecida." };
     }
 
-    return { ok: false as const };
-  }
+    const data = (await res.json()) as CompaniesResponse;
+    return { ok: true as const, companies: data.companies };
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      return {
+        ok: false as const,
+        error: "A consulta do painel demorou demais para responder. Isso normalmente indica indisponibilidade da conexao com o banco.",
+      };
+    }
 
-  const data = (await res.json()) as CompaniesResponse;
-  return { ok: true as const, companies: data.companies };
+    return {
+      ok: false as const,
+      error: "Nao foi possivel carregar o painel administrativo por falha de rede ou servidor.",
+    };
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 export default function AdminPage() {
   const router = useRouter();
+  const latestLoadId = useRef(0);
   const [user, setUser] = useState("admin");
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
@@ -144,72 +176,88 @@ export default function AdminPage() {
   );
   const criticalCount = alerts.filter((alert) => alert.riskBand === "Crítico").length;
   const highAttentionCount = alerts.filter((alert) => alert.riskBand === "Atenção alta").length;
+  const loginFeedback = authError ?? (!authed ? status : null);
 
   const fetchCompanies = useCallback(() => requestCompanies(), []);
 
-  async function loadCompanies() {
+  const loadCompanies = useCallback(async () => {
+    const loadId = latestLoadId.current + 1;
+    latestLoadId.current = loadId;
     setStatus("Carregando...");
     const result = await fetchCompanies();
+    if (loadId !== latestLoadId.current) {
+      return false;
+    }
+
     if (!result.ok) {
+      setAuthError(result.error);
       setStatus("Falha ao carregar empresas. Refaça login.");
       setAuthed(false);
       setCheckingSession(false);
-      return;
+      return false;
     }
 
     setCompanies(result.companies);
     setStatus(null);
     setAuthed(true);
     setCheckingSession(false);
-  }
+    return true;
+  }, [fetchCompanies]);
 
   useEffect(() => {
     let cancelled = false;
 
     async function hydrateCompanies() {
-      setStatus("Carregando...");
-      const result = await fetchCompanies();
+      await loadCompanies();
       if (cancelled) return;
-
-      if (!result.ok) {
-        setStatus("Falha ao carregar empresas. Refaça login.");
-        setAuthed(false);
-        setCheckingSession(false);
-        return;
-      }
-
-      setCompanies(result.companies);
-      setStatus(null);
-      setAuthed(true);
-      setCheckingSession(false);
     }
 
     void hydrateCompanies();
 
     return () => {
       cancelled = true;
+      latestLoadId.current += 1;
     };
-  }, [fetchCompanies]);
+  }, [loadCompanies]);
 
   async function login() {
     setAuthError(null);
+    setStatus(null);
+    setCheckingSession(true);
     setLoading(true);
-    const res = await fetch("/api/admin/login", {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user, password }),
-    });
-    if (!res.ok) {
-      const data = await res.json();
-      setAuthError(data.error ?? "Falha ao autenticar");
+    try {
+      const res = await fetch("/api/admin/login", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user, password }),
+      });
+
+      if (!res.ok) {
+        let message = "Falha ao autenticar.";
+        try {
+          const data = (await res.json()) as { error?: string };
+          message = data.error ?? message;
+        } catch {
+          message = "Nao foi possivel concluir o login agora.";
+        }
+        setAuthError(message);
+        setCheckingSession(false);
+        setLoading(false);
+        return;
+      }
+
       setLoading(false);
-      return;
+      setPassword("");
+      const loaded = await loadCompanies();
+      if (!loaded) {
+        setAuthError("Login aceito, mas a sessao nao ficou disponivel no painel. Se voce acabou de mudar o .env.local, reinicie o servidor e tente novamente.");
+      }
+    } catch {
+      setAuthError("Nao foi possivel conectar ao servidor de autenticacao.");
+      setCheckingSession(false);
+      setLoading(false);
     }
-    setAuthed(true);
-    setLoading(false);
-    setPassword("");
-    await loadCompanies();
   }
 
   async function logout() {
@@ -332,12 +380,40 @@ export default function AdminPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <Field htmlFor="user" label="E-mail corporativo">
-              <Input id="user" value={user} onChange={(e) => setUser(e.target.value)} />
+              <Input
+                id="user"
+                value={user}
+                onChange={(e) => setUser(e.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !loading) {
+                    event.preventDefault();
+                    void login();
+                  }
+                }}
+              />
             </Field>
             <Field htmlFor="password" label="Senha master">
-              <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+              <Input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !loading) {
+                    event.preventDefault();
+                    void login();
+                  }
+                }}
+              />
             </Field>
-            {authError && <p className="text-sm text-[var(--foreground)]">{authError}</p>}
+            <p className="text-xs leading-6 text-[var(--muted-foreground)]">
+              Use o usuario configurado em <code>ADMIN_USER</code> e a senha em <code>ADMIN_PASS</code>.
+            </p>
+            {loginFeedback && (
+              <p className="rounded-2xl border border-[var(--border)] bg-[var(--accent)] px-4 py-3 text-sm text-[var(--foreground)]">
+                {loginFeedback}
+              </p>
+            )}
             <Button disabled={loading} onClick={login} className="w-full" size="lg">
               {loading ? "Autenticando..." : "Autenticar"}
             </Button>

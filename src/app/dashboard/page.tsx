@@ -211,7 +211,9 @@ function DashboardContent() {
       {payload && (
         <div className="mx-auto w-full max-w-[1520px] space-y-8 px-4 py-6 lg:px-8 lg:py-8">
           <DashboardTopBar
+            accessToken={accessToken}
             availableViews={availableViews}
+            companyId={companyId}
             fromAdmin={fromAdmin}
             payload={payload}
             resolvedActiveView={resolvedActiveView}
@@ -255,14 +257,18 @@ function DashboardLoadingState() {
 }
 
 function DashboardTopBar({
+  accessToken,
   availableViews,
+  companyId,
   fromAdmin,
   payload,
   resolvedActiveView,
   setActiveView,
   status,
 }: {
+  accessToken: string;
   availableViews: Array<{ id: ViewMode; label: string; description: string }>;
+  companyId: string;
   fromAdmin: boolean;
   payload: DashboardPayload;
   resolvedActiveView: ViewMode;
@@ -270,6 +276,13 @@ function DashboardTopBar({
   status: string | null;
 }) {
   const router = useRouter();
+
+  function exportCompanyReport() {
+    const params = new URLSearchParams();
+    if (companyId) params.set("companyId", companyId);
+    if (accessToken) params.set("accessToken", accessToken);
+    window.open(`/api/reports/company?${params.toString()}`, "_blank", "noopener,noreferrer");
+  }
 
   return (
     <>
@@ -300,7 +313,7 @@ function DashboardTopBar({
             </div>
             <div className="flex flex-col gap-4 xl:items-end">
               {resolvedActiveView === "company" && (
-                <div className="grid gap-4 sm:grid-cols-3">
+                <div className="grid gap-4 sm:grid-cols-4">
                   <MiniMetric icon={Users} label="Respostas" value={`${payload.totalResponses}`} />
                   <MiniMetric
                     icon={ShieldCheck}
@@ -312,6 +325,10 @@ function DashboardTopBar({
                     label="Atualização"
                     value={new Date(payload.generatedAt).toLocaleDateString("pt-BR")}
                   />
+                  <Button variant="outline" size="sm" onClick={exportCompanyReport}>
+                    <Download className="h-4 w-4" />
+                    Relatório CSV
+                  </Button>
                 </div>
               )}
 

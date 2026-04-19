@@ -1,4 +1,5 @@
 import { Dimension, questions } from "@/lib/questions";
+import { CompanyFilterOptions, CompanyFilters } from "@/lib/dashboard-filters";
 import { ResponseRecord, TriageData } from "@/lib/storage";
 
 export type RiskBand = "Saudável" | "Monitoramento" | "Atenção alta" | "Crítico";
@@ -121,6 +122,8 @@ export type CompanyView = {
   overloadShare: number;
   sleepRiskShare: number;
   conditionPrevalence: ConditionSignal[];
+  executiveSummary: NarrativeInsight[];
+  priorityInsights: NarrativeInsight[];
 };
 
 export type TechnicalResponseRow = {
@@ -161,6 +164,8 @@ export type DashboardPayload = {
   participationRate?: number;
   activeTeamFilter?: string;
   teamOptions: string[];
+  activeFilters: CompanyFilters;
+  filterOptions: CompanyFilterOptions;
   individual: IndividualView | null;
   companyView: CompanyView | null;
   companyAccess?: CompanyAccessSnapshot | null;
