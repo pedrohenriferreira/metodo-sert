@@ -694,6 +694,79 @@ function buildCompanyInsights(args: { dimensionScores: DimensionScore[]; tendenc
   return insights.slice(0, 4);
 }
 
+function buildExecutiveSummary(args: {
+  weakestDimension: Dimension;
+  highRiskShare: number;
+  topTendency?: ConditionSignal;
+  totalResponses: number;
+}) {
+  const { highRiskShare, topTendency, totalResponses, weakestDimension } = args;
+  const summary: NarrativeInsight[] = [
+    {
+      title: "Recorte em foco",
+      detail: `${totalResponses} respostas compoem a leitura atual, com ${highRiskShare.toFixed(0)}% da base em alta atencao ou criticidade.`,
+      tone: highRiskShare >= 35 ? "attention" : "neutral",
+    },
+    {
+      title: "Eixo mais sensivel",
+      detail: `${weakestDimension} e a dimensao que mais puxa o resultado para baixo neste recorte.`,
+      tone: "attention",
+    },
+  ];
+
+  if (topTendency) {
+    summary.push({
+      title: "Sinal contextual dominante",
+      detail: `${topTendency.name} aparece como o sinal mais prevalente e ajuda a explicar a concentracao do risco.`,
+      tone: topTendency.severity === "alto" ? "attention" : "neutral",
+    });
+  }
+
+  return summary.slice(0, 3);
+}
+
+function buildPriorityInsights(args: {
+  weakestDimension: Dimension;
+  highRiskShare: number;
+  overloadShare: number;
+  sleepRiskShare: number;
+  burnoutRiskShare: number;
+  anxietyRiskShare: number;
+  topTendency?: ConditionSignal;
+}) {
+  const { anxietyRiskShare, burnoutRiskShare, highRiskShare, overloadShare, sleepRiskShare, topTendency, weakestDimension } = args;
+  const priorities: NarrativeInsight[] = [];
+
+  priorities.push({
+    title: "Prioridade 1",
+    detail:
+      highRiskShare >= 35
+        ? "Acione monitoramento mais proximo e conversa com lideranca, porque a concentracao de casos sensiveis ja pede resposta rapida."
+        : "Monitore o recorte com rotina curta de acompanhamento para evitar escalada nos grupos mais sensiveis.",
+    tone: highRiskShare >= 35 ? "attention" : "neutral",
+  });
+
+  priorities.push({
+    title: "Prioridade 2",
+    detail:
+      weakestDimension === "Demanda e Ritmo" || overloadShare >= 35 || burnoutRiskShare >= anxietyRiskShare
+        ? "Revise carga, ritmo operacional e distribuicao do trabalho. O recorte sugere desgaste e sobrecarga como vetores relevantes."
+        : `Aprofunde o eixo ${weakestDimension}, porque ele esta concentrando a maior fragilidade do grupo filtrado.`,
+    tone: "attention",
+  });
+
+  priorities.push({
+    title: "Prioridade 3",
+    detail:
+      sleepRiskShare >= 35 || topTendency?.name.includes("Sono")
+        ? "Inclua recuperacao, descanso e fadiga na devolutiva para RH e lideranca. O recorte mostra desgaste sustentado."
+        : "Feche um plano de acao curto com responsaveis, prazo e nova leitura do mesmo recorte para comparar evolucao.",
+    tone: sleepRiskShare >= 35 ? "attention" : "positive",
+  });
+
+  return priorities;
+}
+
 function buildCompanyView(responses: ResponseRecord[]): CompanyView {
   const perResponse = responses.map(computePerResponse);
   const dimensionScores = buildCompanyDimensions(perResponse);
@@ -707,6 +780,35 @@ function buildCompanyView(responses: ResponseRecord[]): CompanyView {
   const satisfactionScore = indicatorBars.find((item) => item.key === "satisfaction")?.value ?? 0;
   const burnoutRiskShare = percent(perResponse.filter((item) => getIndicatorMap(item).burnout >= 60).length, perResponse.length);
   const anxietyRiskShare = percent(perResponse.filter((item) => getIndicatorMap(item).anxiety >= 60).length, perResponse.length);
+  const highRiskShare = percent(
+    perResponse.filter((item) => item.riskBand === "Atenção alta" || item.riskBand === "Crítico").length,
+    perResponse.length
+  );
+  const overloadShare = percent(
+    perResponse.filter((item) => item.response.triage?.recentOverload === "sim").length,
+    perResponse.length
+  );
+  const sleepRiskShare = percent(
+    perResponse.filter(
+      (item) => item.response.triage?.sleepQuality === "regular" || item.response.triage?.sleepQuality === "ruim"
+    ).length,
+    perResponse.length
+  );
+  const executiveSummary = buildExecutiveSummary({
+    weakestDimension: sortedDimensions[0]?.dimension ?? "Demanda e Ritmo",
+    highRiskShare,
+    topTendency: tendencies[0],
+    totalResponses: responses.length,
+  });
+  const priorityInsights = buildPriorityInsights({
+    weakestDimension: sortedDimensions[0]?.dimension ?? "Demanda e Ritmo",
+    highRiskShare,
+    overloadShare,
+    sleepRiskShare,
+    burnoutRiskShare,
+    anxietyRiskShare,
+    topTendency: tendencies[0],
+  });
 
   return {
     totalResponses: responses.length,
@@ -754,21 +856,12 @@ function buildCompanyView(responses: ResponseRecord[]): CompanyView {
       count: 1,
       values: item.dimensionScores.map((dimension) => ({ dimension: dimension.dimension, score: dimension.average })),
     })),
-    highRiskShare: percent(
-      perResponse.filter((item) => item.riskBand === "Atenção alta" || item.riskBand === "Crítico").length,
-      perResponse.length
-    ),
-    overloadShare: percent(
-      perResponse.filter((item) => item.response.triage?.recentOverload === "sim").length,
-      perResponse.length
-    ),
-    sleepRiskShare: percent(
-      perResponse.filter(
-        (item) => item.response.triage?.sleepQuality === "regular" || item.response.triage?.sleepQuality === "ruim"
-      ).length,
-      perResponse.length
-    ),
+    highRiskShare,
+    overloadShare,
+    sleepRiskShare,
     conditionPrevalence,
+    executiveSummary,
+    priorityInsights,
   };
 }
 
@@ -778,6 +871,8 @@ export function buildDashboardPayload(args: {
   seats?: number;
   teamOptions?: string[];
   activeTeamFilter?: string;
+  filterOptions?: CompanyFilterOptions;
+  activeFilters?: CompanyFilters;
   ownerResponseId?: string;
   companyAccess?: CompanyAccessSnapshot | null;
   includeCompanyView?: boolean;
@@ -790,6 +885,8 @@ export function buildDashboardPayload(args: {
     includeCompanyView = true,
     teamOptions = [],
     activeTeamFilter = "all",
+    filterOptions,
+    activeFilters,
     ownerResponseId,
     responses,
     seats,
@@ -806,6 +903,35 @@ export function buildDashboardPayload(args: {
     participationRate: seats ? percent(responses.length, seats) : undefined,
     activeTeamFilter,
     teamOptions,
+    activeFilters: activeFilters ?? {
+      team: "all",
+      area: "all",
+      tenureBand: "all",
+      workModel: "all",
+      leadership: "all",
+      publicExposure: "all",
+      recentOverload: "all",
+      sleepQuality: "all",
+      energyLevel: "all",
+      emotionalPressure: "all",
+      motivationLevel: "all",
+      socialIsolation: "all",
+    },
+    filterOptions: filterOptions ?? {
+      team: [],
+      area: [],
+      areasByTeam: {},
+      tenureBand: ["ate-3m", "3-12m", "1-3a", "3a-plus"],
+      workModel: [],
+      leadership: [],
+      publicExposure: [],
+      recentOverload: [],
+      sleepQuality: [],
+      energyLevel: [],
+      emotionalPressure: [],
+      motivationLevel: [],
+      socialIsolation: [],
+    },
     individual,
     companyView: includeCompanyView ? buildCompanyView(responses) : null,
     companyAccess: includeCompanyView ? companyAccess : null,

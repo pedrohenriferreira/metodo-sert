@@ -1,9 +1,9 @@
 "use client";
 
 import type { ComponentType } from "react";
-import { Suspense, useEffect, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Ban, Calendar, Copy, Download, KeyRound, Layers3, Lock, RotateCcw, Settings2, ShieldAlert, ShieldCheck, Sparkles, Trash2, Users, X } from "lucide-react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { ArrowLeft, Ban, Calendar, Copy, Download, KeyRound, Layers3, Lock, RotateCcw, Settings2, ShieldAlert, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, Users, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,6 +23,15 @@ import type {
   QuestionScore,
   ViewMode,
 } from "@/lib/metrics";
+import {
+  applyCompanyFiltersToParams,
+  getDefaultCompanyFilters,
+  getTenureBandLabel,
+  hasActiveCompanyFilters,
+  parseCompanyFiltersFromParams,
+  type CompanyFilters,
+  type TenureBand,
+} from "@/lib/dashboard-filters";
 import { dimensionDescriptions, Dimension } from "@/lib/questions";
 import { cn } from "@/lib/utils";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, PolarAngleAxis, PolarGrid, Radar, RadarChart, XAxis, YAxis } from "recharts";
@@ -93,13 +102,13 @@ export default function DashboardPage() {
 }
 
 function DashboardContent() {
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
   const [payload, setPayload] = useState<DashboardPayload | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<ViewMode>("company");
   const [blocked, setBlocked] = useState(false);
-  const [teamFilter, setTeamFilter] = useState("all");
 
   const viewKey = searchParams.get("view") ?? "";
   const memberToken = searchParams.get("memberToken") ?? "";
@@ -107,16 +116,28 @@ function DashboardContent() {
   const companyId = searchParams.get("companyId") ?? "";
   const adminScope = searchParams.get("adminScope") ?? "";
   const fromAdmin = searchParams.get("fromAdmin") === "1";
+  const companyFilters = useMemo(() => parseCompanyFiltersFromParams(searchParams), [searchParams]);
 
-  async function loadDashboard() {
+  const buildDashboardParams = useCallback((filters: CompanyFilters) => {
     const params = new URLSearchParams();
     if (viewKey) params.set("viewKey", viewKey);
     if (memberToken) params.set("memberToken", memberToken);
     if (accessToken) params.set("accessToken", accessToken);
     if (companyId) params.set("companyId", companyId);
     if (adminScope) params.set("adminScope", adminScope);
-    if (teamFilter !== "all") params.set("team", teamFilter);
+    applyCompanyFiltersToParams(params, filters);
+    return params;
+  }, [accessToken, adminScope, companyId, memberToken, viewKey]);
 
+  function syncFiltersToUrl(filters: CompanyFilters) {
+    const params = new URLSearchParams(searchParams.toString());
+    applyCompanyFiltersToParams(params, filters);
+    const href = params.toString() ? `${pathname}?${params.toString()}` : pathname;
+    router.replace(href, { scroll: false });
+  }
+
+  async function loadDashboard() {
+    const params = buildDashboardParams(companyFilters);
     const endpoint = `/api/responses?${params.toString()}`;
     const response = await fetch(endpoint);
 
@@ -130,7 +151,6 @@ function DashboardContent() {
     const data = (await response.json()) as DashboardPayload;
     setPayload(data);
     setActiveView(data.defaultView);
-    setTeamFilter(data.activeTeamFilter ?? "all");
     setBlocked(false);
     setStatus(null);
   }
@@ -139,14 +159,7 @@ function DashboardContent() {
     let cancelled = false;
 
     async function hydrateDashboard() {
-      const params = new URLSearchParams();
-      if (viewKey) params.set("viewKey", viewKey);
-      if (memberToken) params.set("memberToken", memberToken);
-      if (accessToken) params.set("accessToken", accessToken);
-      if (companyId) params.set("companyId", companyId);
-      if (adminScope) params.set("adminScope", adminScope);
-      if (teamFilter !== "all") params.set("team", teamFilter);
-
+      const params = buildDashboardParams(companyFilters);
       const endpoint = `/api/responses?${params.toString()}`;
       const response = await fetch(endpoint);
       if (cancelled) return;
@@ -163,7 +176,6 @@ function DashboardContent() {
 
       setPayload(data);
       setActiveView(data.defaultView);
-      setTeamFilter(data.activeTeamFilter ?? "all");
       setBlocked(false);
       setStatus(null);
     }
@@ -173,7 +185,7 @@ function DashboardContent() {
     return () => {
       cancelled = true;
     };
-  }, [accessToken, adminScope, companyId, memberToken, teamFilter, viewKey]);
+  }, [buildDashboardParams, companyFilters]);
 
   const availableViews = useMemo(() => {
     if (!payload) return [] as Array<{ id: ViewMode; label: string; description: string }>;
@@ -232,9 +244,11 @@ function DashboardContent() {
                 companyLabel={payload.companyLabel}
                 accessToken={accessToken}
                 onRefresh={loadDashboard}
-                teamFilter={teamFilter}
-                teamOptions={payload.teamOptions}
-                setTeamFilter={setTeamFilter}
+                activeFilters={companyFilters}
+                filterOptions={payload.filterOptions}
+                onChangeFilters={(nextFilters) => {
+                  syncFiltersToUrl(nextFilters);
+                }}
               />
             )}
           </div>
@@ -281,6 +295,7 @@ function DashboardTopBar({
     const params = new URLSearchParams();
     if (companyId) params.set("companyId", companyId);
     if (accessToken) params.set("accessToken", accessToken);
+    applyCompanyFiltersToParams(params, payload.activeFilters);
     window.open(`/api/reports/company?${params.toString()}`, "_blank", "noopener,noreferrer");
   }
 
@@ -462,53 +477,80 @@ function CompanySection({
   companyLabel,
   accessToken,
   onRefresh,
-  teamFilter,
-  teamOptions,
-  setTeamFilter,
+  activeFilters,
+  filterOptions,
+  onChangeFilters,
 }: {
   companyView: CompanyView;
   companyAccess: DashboardPayload["companyAccess"];
   companyLabel: string;
   accessToken: string;
   onRefresh: () => Promise<void>;
-  teamFilter: string;
-  teamOptions: string[];
-  setTeamFilter: (value: string) => void;
+  activeFilters: CompanyFilters;
+  filterOptions: DashboardPayload["filterOptions"];
+  onChangeFilters: (filters: CompanyFilters) => void;
 }) {
   const [tokenModalOpen, setTokenModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("panorama");
+  const [filtersPanelOpen, setFiltersPanelOpen] = useState(false);
+  const activeFilterChips = buildActiveFilterChips(activeFilters);
 
   return (
     <div className="space-y-6">
-      {!!teamOptions.length && activeTab !== "panorama" && (
-        <div className="flex flex-col gap-3 rounded-[1.6rem] border border-[var(--border)] bg-[rgba(255,255,255,0.72)] px-4 py-4 md:flex-row md:items-end md:justify-between">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-center">
+        <TabsList className="grid w-full grid-cols-2 gap-2 lg:grid-cols-5">
+          <TabsTrigger value="panorama">Panorama executivo</TabsTrigger>
+          <TabsTrigger value="visao-geral">Visão geral</TabsTrigger>
+          <TabsTrigger value="diagnostico">Diagnóstico</TabsTrigger>
+          <TabsTrigger value="recortes">Recortes</TabsTrigger>
+          <TabsTrigger value="tecnico">Camada técnica</TabsTrigger>
+        </TabsList>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-12 rounded-[1.25rem] px-4 xl:min-w-[170px]"
+          onClick={() => setFiltersPanelOpen(true)}
+        >
+          <SlidersHorizontal className="h-4 w-4" />
+          Filtros
+          {activeFilterChips.length ? (
+            <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-[var(--foreground)] px-2 text-xs text-white">
+              {activeFilterChips.length}
+            </span>
+          ) : null}
+        </Button>
+      </div>
+
+      <div className="flex flex-col gap-3 rounded-[1.6rem] border border-[var(--border)] bg-[rgba(255,255,255,0.68)] px-4 py-4 shadow-[0_12px_28px_rgba(44,62,80,0.05)]">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="space-y-1">
-            <p className="text-sm font-semibold text-[var(--foreground)]">Filtro global por time</p>
+            <p className="text-sm font-semibold text-[var(--foreground)]">Recorte ativo</p>
             <p className="text-sm text-[var(--muted-foreground)]">
-              A visão empresa está mostrando os dados de {teamFilter === "all" ? "todos os times cadastrados" : `time: ${teamFilter}`}.
+              {activeFilterChips.length
+                ? "Os indicadores abaixo estao recalculados com base nos filtros selecionados."
+                : "Nenhum filtro aplicado. A leitura mostra a base consolidada da empresa."}
             </p>
           </div>
-          <div className="w-full md:w-[320px]">
-            <Select value={teamFilter} onChange={(event) => setTeamFilter(event.target.value)} aria-label="Filtrar visão empresa por time">
-              <option value="all">Todos os times</option>
-              {teamOptions.map((team) => (
-                <option key={team} value={team}>
-                  {team}
-                </option>
-              ))}
-            </Select>
+          <div className="flex flex-wrap items-center gap-3">
+            <Badge variant="outline">{companyView.totalResponses} pessoas no recorte</Badge>
+            {activeFilterChips.length ? (
+              <Button variant="outline" size="sm" onClick={() => onChangeFilters(getDefaultCompanyFilters())}>
+                <RotateCcw className="h-4 w-4" />
+                Limpar filtros
+              </Button>
+            ) : null}
           </div>
         </div>
-      )}
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-      <TabsList className="grid w-full grid-cols-2 gap-2 lg:grid-cols-5">
-        <TabsTrigger value="panorama">Panorama executivo</TabsTrigger>
-        <TabsTrigger value="visao-geral">Visão geral</TabsTrigger>
-        <TabsTrigger value="diagnostico">Diagnóstico</TabsTrigger>
-        <TabsTrigger value="recortes">Recortes</TabsTrigger>
-        <TabsTrigger value="tecnico">Camada técnica</TabsTrigger>
-      </TabsList>
+        {activeFilterChips.length ? (
+          <div className="flex flex-wrap gap-2">
+            {activeFilterChips.map((chip) => (
+              <Badge key={chip} variant="outline">{chip}</Badge>
+            ))}
+          </div>
+        ) : null}
+      </div>
 
       <TabsContent value="panorama" className="space-y-8">
         <SectionHeader
@@ -597,6 +639,35 @@ function CompanySection({
             />
           </section>
         )}
+
+        <section className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+          <Card className="rounded-[26px] border-[var(--border)] bg-[rgba(255,255,255,0.9)] shadow-[0_18px_45px_rgba(44,62,80,0.06)]">
+            <CardHeader>
+              <CardTitle className="text-xl">Resumo executivo do recorte</CardTitle>
+              <CardDescription>Leitura automatica para RH, lideranca e consultoria com foco no grupo filtrado.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4 md:grid-cols-3">
+              {companyView.executiveSummary.map((insight) => (
+                <InsightCard key={insight.title} title={insight.title} detail={insight.detail} tone={insight.tone} />
+              ))}
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-[26px] border-[var(--border)] bg-[rgba(255,255,255,0.9)] shadow-[0_18px_45px_rgba(44,62,80,0.06)]">
+            <CardHeader>
+              <CardTitle className="text-xl">Priorizacao de acao</CardTitle>
+              <CardDescription>As tres frentes mais valiosas para agir primeiro neste recorte.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {companyView.priorityInsights.map((insight) => (
+                <div key={insight.title} className="rounded-[1.35rem] border border-[var(--border)] bg-[var(--accent)] px-4 py-4">
+                  <p className="text-sm font-semibold text-[var(--foreground)]">{insight.title}</p>
+                  <p className="mt-2 text-sm leading-6 text-[var(--muted-foreground)]">{insight.detail}</p>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </section>
       </TabsContent>
 
       <TabsContent value="visao-geral" className="space-y-8">
@@ -801,7 +872,204 @@ function CompanySection({
         </Card>
       </TabsContent>
       </Tabs>
+
+      <CompanyFilterPanel
+        activeFilters={activeFilters}
+        activeFilterChips={activeFilterChips}
+        filterOptions={filterOptions}
+        onChangeFilters={onChangeFilters}
+        onClose={() => setFiltersPanelOpen(false)}
+        open={filtersPanelOpen}
+        sampleSize={companyView.totalResponses}
+      />
     </div>
+  );
+}
+
+function CompanyFilterPanel({
+  activeFilters,
+  activeFilterChips,
+  filterOptions,
+  onChangeFilters,
+  onClose,
+  open,
+  sampleSize,
+}: {
+  activeFilters: CompanyFilters;
+  activeFilterChips: string[];
+  filterOptions: DashboardPayload["filterOptions"];
+  onChangeFilters: (filters: CompanyFilters) => void;
+  onClose: () => void;
+  open: boolean;
+  sampleSize: number;
+}) {
+  const hasActiveFilters = hasActiveCompanyFilters(activeFilters);
+  const resolvedAreaOptions =
+    activeFilters.team !== "all"
+      ? filterOptions.areasByTeam[activeFilters.team] ?? []
+      : filterOptions.area;
+
+  function updateFilter<K extends keyof CompanyFilters>(key: K, value: CompanyFilters[K]) {
+    const nextFilters = { ...activeFilters, [key]: value };
+    if (key === "team" && nextFilters.area !== "all") {
+      const nextAreaOptions = value !== "all" ? filterOptions.areasByTeam[String(value)] ?? [] : filterOptions.area;
+      if (!nextAreaOptions.includes(nextFilters.area)) {
+        nextFilters.area = "all";
+      }
+    }
+    onChangeFilters(nextFilters);
+  }
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-[rgba(36,49,77,0.18)] backdrop-blur-[2px]">
+      <button type="button" aria-label="Fechar filtros" className="flex-1 cursor-default" onClick={onClose} />
+      <div className="flex h-full w-full max-w-[460px] flex-col border-l border-[var(--border)] bg-[rgba(252,253,255,0.97)] shadow-[-24px_0_60px_rgba(44,62,80,0.16)]">
+        <div className="flex items-start justify-between gap-4 border-b border-[var(--border)] px-5 py-5">
+          <div className="space-y-2">
+            <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--muted-foreground)]">Filtros da visão empresa</p>
+            <div>
+              <h3 className="text-2xl font-semibold tracking-[-0.04em] text-[var(--foreground)]">Refinar recorte</h3>
+              <p className="mt-2 text-sm leading-6 text-[var(--muted-foreground)]">
+                Combine variáveis estruturais e contextuais para localizar melhor a concentração de risco.
+              </p>
+            </div>
+          </div>
+          <Button type="button" variant="outline" size="icon" className="h-10 w-10 rounded-full" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
+          <Badge variant="outline">{sampleSize} pessoas no recorte</Badge>
+          {hasActiveFilters ? (
+            <Button variant="outline" size="sm" onClick={() => onChangeFilters(getDefaultCompanyFilters())}>
+              <RotateCcw className="h-4 w-4" />
+              Limpar filtros
+            </Button>
+          ) : null}
+        </div>
+
+        <div className="flex-1 space-y-6 overflow-y-auto px-5 py-5">
+          <div className="grid gap-4 md:grid-cols-2">
+          <FilterSelect
+            label="Time"
+            value={activeFilters.team}
+            options={filterOptions.team.map((value) => ({ value, label: value }))}
+            onChange={(value) => updateFilter("team", value)}
+          />
+          <FilterSelect
+            label="Area"
+            value={activeFilters.area}
+            options={resolvedAreaOptions.map((value) => ({ value, label: value }))}
+            onChange={(value) => updateFilter("area", value)}
+          />
+          <FilterSelect
+            label="Tempo de empresa"
+            value={activeFilters.tenureBand}
+            options={filterOptions.tenureBand.map((value) => ({ value, label: getTenureBandLabel(value) }))}
+            onChange={(value) => updateFilter("tenureBand", value as TenureBand)}
+          />
+          <FilterSelect
+            label="Modelo de trabalho"
+            value={activeFilters.workModel}
+            options={filterOptions.workModel.map((value) => ({ value, label: triageLabels.workModel[value] }))}
+            onChange={(value) => updateFilter("workModel", value as CompanyFilters["workModel"])}
+          />
+          <FilterSelect
+            label="Lideranca"
+            value={activeFilters.leadership}
+            options={filterOptions.leadership.map((value) => ({ value, label: triageLabels.leadership[value] }))}
+            onChange={(value) => updateFilter("leadership", value as CompanyFilters["leadership"])}
+          />
+          <FilterSelect
+            label="Exposicao ao publico"
+            value={activeFilters.publicExposure}
+            options={filterOptions.publicExposure.map((value) => ({ value, label: triageLabels.publicExposure[value] }))}
+            onChange={(value) => updateFilter("publicExposure", value as CompanyFilters["publicExposure"])}
+          />
+          <FilterSelect
+            label="Sobrecarga recente"
+            value={activeFilters.recentOverload}
+            options={filterOptions.recentOverload.map((value) => ({ value, label: triageLabels.recentOverload[value] }))}
+            onChange={(value) => updateFilter("recentOverload", value as CompanyFilters["recentOverload"])}
+          />
+          <FilterSelect
+            label="Sono"
+            value={activeFilters.sleepQuality}
+            options={filterOptions.sleepQuality.map((value) => ({ value, label: triageLabels.sleepQuality[value] }))}
+            onChange={(value) => updateFilter("sleepQuality", value as CompanyFilters["sleepQuality"])}
+          />
+          <FilterSelect
+            label="Energia"
+            value={activeFilters.energyLevel}
+            options={filterOptions.energyLevel.map((value) => ({ value, label: triageLabels.energyLevel[value] }))}
+            onChange={(value) => updateFilter("energyLevel", value as CompanyFilters["energyLevel"])}
+          />
+          <FilterSelect
+            label="Pressao emocional"
+            value={activeFilters.emotionalPressure}
+            options={filterOptions.emotionalPressure.map((value) => ({ value, label: triageLabels.emotionalPressure[value] }))}
+            onChange={(value) => updateFilter("emotionalPressure", value as CompanyFilters["emotionalPressure"])}
+          />
+          <FilterSelect
+            label="Motivacao"
+            value={activeFilters.motivationLevel}
+            options={filterOptions.motivationLevel.map((value) => ({ value, label: triageLabels.motivationLevel[value] }))}
+            onChange={(value) => updateFilter("motivationLevel", value as CompanyFilters["motivationLevel"])}
+          />
+          <FilterSelect
+            label="Isolamento social"
+            value={activeFilters.socialIsolation}
+            options={filterOptions.socialIsolation.map((value) => ({ value, label: triageLabels.socialIsolation[value] }))}
+            onChange={(value) => updateFilter("socialIsolation", value as CompanyFilters["socialIsolation"])}
+          />
+        </div>
+
+        {activeFilterChips.length ? (
+          <div className="space-y-3">
+            <p className="text-sm font-semibold text-[var(--foreground)]">Filtros ativos</p>
+            <div className="flex flex-wrap gap-2">
+            {activeFilterChips.map((chip) => (
+              <Badge key={chip} variant="outline">{chip}</Badge>
+            ))}
+          </div>
+          </div>
+        ) : (
+          <p className="text-sm text-[var(--muted-foreground)]">
+            Nenhum filtro aplicado. O painel esta mostrando a base consolidada da empresa.
+          </p>
+        )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FilterSelect({
+  label,
+  onChange,
+  options,
+  value,
+}: {
+  label: string;
+  onChange: (value: string) => void;
+  options: Array<{ value: string; label: string }>;
+  value: string;
+}) {
+  return (
+    <label className="space-y-2">
+      <span className="text-sm font-semibold text-[var(--foreground)]">{label}</span>
+      <Select value={value} onChange={(event) => onChange(event.target.value)}>
+        <option value="all">Todos</option>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </Select>
+    </label>
   );
 }
 
@@ -1509,6 +1777,25 @@ function buildTriagePills(individual: IndividualView) {
   if (triage.weeklyHours) pills.push(`${triage.weeklyHours}h/semana`);
 
   return pills;
+}
+
+function buildActiveFilterChips(filters: CompanyFilters) {
+  const chips: string[] = [];
+
+  if (filters.team !== "all") chips.push(`Time: ${filters.team}`);
+  if (filters.area !== "all") chips.push(`Area: ${filters.area}`);
+  if (filters.tenureBand !== "all") chips.push(`Tempo: ${getTenureBandLabel(filters.tenureBand)}`);
+  if (filters.workModel !== "all") chips.push(triageLabels.workModel[filters.workModel]);
+  if (filters.leadership !== "all") chips.push(triageLabels.leadership[filters.leadership]);
+  if (filters.publicExposure !== "all") chips.push(triageLabels.publicExposure[filters.publicExposure]);
+  if (filters.recentOverload !== "all") chips.push(triageLabels.recentOverload[filters.recentOverload]);
+  if (filters.sleepQuality !== "all") chips.push(triageLabels.sleepQuality[filters.sleepQuality]);
+  if (filters.energyLevel !== "all") chips.push(triageLabels.energyLevel[filters.energyLevel]);
+  if (filters.emotionalPressure !== "all") chips.push(triageLabels.emotionalPressure[filters.emotionalPressure]);
+  if (filters.motivationLevel !== "all") chips.push(triageLabels.motivationLevel[filters.motivationLevel]);
+  if (filters.socialIsolation !== "all") chips.push(triageLabels.socialIsolation[filters.socialIsolation]);
+
+  return chips;
 }
 
 function formatTriagedValue(value?: string) {

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { filterResponsesByCompanyFilters, parseCompanyFiltersFromParams } from "@/lib/dashboard-filters";
 import { summarizeResponseRisk } from "@/lib/metrics";
 import { auditLog, createAuditContext, getAdminPrincipal } from "@/lib/security";
 import { listCompanies, readResponses, validateToken } from "@/lib/storage";
@@ -13,6 +14,7 @@ export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const companyId = url.searchParams.get("companyId")?.trim();
   const accessToken = url.searchParams.get("accessToken")?.trim().toUpperCase();
+  const activeFilters = parseCompanyFiltersFromParams(url.searchParams);
   const admin = getAdminPrincipal(request);
   const auditContext = createAuditContext(request);
 
@@ -42,6 +44,7 @@ export async function GET(request: NextRequest) {
   }
 
   const companyResponses = responses.filter((response) => response.companyId === company.id);
+  const filteredResponses = filterResponsesByCompanyFilters(companyResponses, activeFilters);
   const rows = [
     [
       "empresa",
@@ -61,7 +64,7 @@ export async function GET(request: NextRequest) {
       "motivacao",
       "isolamento_social",
     ],
-    ...companyResponses.map((response) => {
+    ...filteredResponses.map((response) => {
       const summary = summarizeResponseRisk(response);
       return [
         company.name,
@@ -88,7 +91,7 @@ export async function GET(request: NextRequest) {
     ...auditContext,
     principal: admin ? admin.kind : "company-token",
     companyId: company.id,
-    responseCount: companyResponses.length,
+    responseCount: filteredResponses.length,
   });
 
   return new NextResponse(`\uFEFF${buildCsv(rows)}`, {

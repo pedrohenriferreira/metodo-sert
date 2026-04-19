@@ -10,6 +10,12 @@ import { buildDashboardPayload, summarizeResponseRisk, ViewMode } from "@/lib/me
 import { captureServerError } from "@/lib/observability";
 import { applyRateLimit, auditLog, createAuditContext, getAdminPrincipal } from "@/lib/security";
 import {
+  buildCompanyFilterOptions,
+  filterResponsesByCompanyFilters,
+  parseCompanyFiltersFromParams,
+  type CompanyFilters,
+} from "@/lib/dashboard-filters";
+import {
   consumeToken,
   LikertValue,
   listCompanies,
@@ -77,19 +83,8 @@ function buildCompanyAccessSnapshot(args: {
   };
 }
 
-function getTeamOptions(responses: ResponseRecord[]) {
-  return Array.from(
-    new Set(
-      responses
-        .map((response) => response.team?.trim())
-        .filter((team): team is string => Boolean(team))
-    )
-  ).sort((a, b) => a.localeCompare(b, "pt-BR"));
-}
-
-function filterResponsesByTeam(responses: ResponseRecord[], activeTeamFilter: string) {
-  if (activeTeamFilter === "all") return responses;
-  return responses.filter((response) => response.team?.trim() === activeTeamFilter);
+function getTeamOptionsFromFilters(filters: CompanyFilters) {
+  return filters.team;
 }
 
 export async function GET(request: NextRequest) {
@@ -106,7 +101,7 @@ export async function GET(request: NextRequest) {
   const accessToken = url.searchParams.get("accessToken");
   const companyId = url.searchParams.get("companyId");
   const adminScope = url.searchParams.get("adminScope");
-  const teamFilter = url.searchParams.get("team")?.trim() ?? "all";
+  const companyFilters = parseCompanyFiltersFromParams(url.searchParams);
   const adminAuthorized = isAdminAuthorized(request);
 
   const responses = await readResponses();
@@ -120,8 +115,9 @@ export async function GET(request: NextRequest) {
 
     const company = companies.find((item) => item.id === owner.companyId);
     const companyResponses = responses.filter((response) => response.companyId === owner.companyId);
-    const teamOptions = getTeamOptions(companyResponses);
-    const scopedCompanyResponses = filterResponsesByTeam(companyResponses, teamFilter);
+    const teamOptions = buildCompanyFilterOptions(companyResponses).team;
+    const filterOptions = buildCompanyFilterOptions(companyResponses);
+    const scopedCompanyResponses = filterResponsesByCompanyFilters(companyResponses, companyFilters);
     const scopedResponses = adminScope === "individual-complete" ? [owner] : companyResponses;
     const companyLabel =
       adminScope === "individual-complete"
@@ -134,7 +130,9 @@ export async function GET(request: NextRequest) {
       companyLabel,
       seats: adminScope === "individual-complete" ? 1 : company?.seats,
       teamOptions,
-      activeTeamFilter: teamFilter,
+      activeTeamFilter: getTeamOptionsFromFilters(companyFilters),
+      filterOptions,
+      activeFilters: companyFilters,
       ownerResponseId: owner.id,
       companyAccess: adminScope === "individual-complete" ? companyAccess : companyAccess,
       ...withAllowedViews(["individual", "company"], adminScope === "individual-complete" ? "company" : "individual"),
@@ -146,7 +144,9 @@ export async function GET(request: NextRequest) {
         companyLabel,
         seats: company?.seats,
         teamOptions,
-        activeTeamFilter: teamFilter,
+        activeTeamFilter: getTeamOptionsFromFilters(companyFilters),
+        filterOptions,
+        activeFilters: companyFilters,
         companyAccess,
         allowedViews: ["company"],
         defaultView: "company",
@@ -161,8 +161,9 @@ export async function GET(request: NextRequest) {
   if (adminAuthorized && companyId) {
     const company = companies.find((item) => item.id === companyId);
     const companyResponses = responses.filter((response) => response.companyId === companyId);
-    const teamOptions = getTeamOptions(companyResponses);
-    const filteredResponses = filterResponsesByTeam(companyResponses, teamFilter);
+    const filterOptions = buildCompanyFilterOptions(companyResponses);
+    const teamOptions = filterOptions.team;
+    const filteredResponses = filterResponsesByCompanyFilters(companyResponses, companyFilters);
     const companyAccess = buildCompanyAccessSnapshot({ company, responses: companyResponses });
 
     const payload = buildDashboardPayload({
@@ -170,7 +171,9 @@ export async function GET(request: NextRequest) {
       companyLabel: company?.name ?? "Empresa",
       seats: company?.seats,
       teamOptions,
-      activeTeamFilter: teamFilter,
+      activeTeamFilter: getTeamOptionsFromFilters(companyFilters),
+      filterOptions,
+      activeFilters: companyFilters,
       companyAccess,
       ...withAllowedViews(["company"], "company"),
     });
@@ -190,15 +193,18 @@ export async function GET(request: NextRequest) {
     }
 
     const companyResponses = responses.filter((response) => response.companyId === tokenData.company.id);
-    const teamOptions = getTeamOptions(companyResponses);
-    const filteredResponses = filterResponsesByTeam(companyResponses, teamFilter);
+    const filterOptions = buildCompanyFilterOptions(companyResponses);
+    const teamOptions = filterOptions.team;
+    const filteredResponses = filterResponsesByCompanyFilters(companyResponses, companyFilters);
     const companyAccess = buildCompanyAccessSnapshot({ company: tokenData.company, responses: companyResponses });
     const payload = buildDashboardPayload({
       responses: filteredResponses,
       companyLabel: tokenData.company.name,
       seats: tokenData.company.seats,
       teamOptions,
-      activeTeamFilter: teamFilter,
+      activeTeamFilter: getTeamOptionsFromFilters(companyFilters),
+      filterOptions,
+      activeFilters: companyFilters,
       companyAccess,
       ...withAllowedViews(["company"], "company"),
     });
@@ -232,6 +238,8 @@ export async function GET(request: NextRequest) {
       seats: 1,
       teamOptions: [],
       activeTeamFilter: "all",
+      filterOptions: buildCompanyFilterOptions([owner]),
+      activeFilters: companyFilters,
       ownerResponseId: owner.id,
       includeCompanyView: false,
       ...withAllowedViews(["individual"], "individual"),

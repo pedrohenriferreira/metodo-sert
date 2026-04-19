@@ -20,6 +20,7 @@ export type CompanyFilters = {
 export type CompanyFilterOptions = {
   team: string[];
   area: string[];
+  areasByTeam: Record<string, string[]>;
   tenureBand: TenureBand[];
   workModel: NonNullable<TriageData["workModel"]>[];
   leadership: NonNullable<TriageData["leadership"]>[];
@@ -30,6 +31,10 @@ export type CompanyFilterOptions = {
   emotionalPressure: NonNullable<TriageData["emotionalPressure"]>[];
   motivationLevel: NonNullable<TriageData["motivationLevel"]>[];
   socialIsolation: NonNullable<TriageData["socialIsolation"]>[];
+};
+
+type SearchParamsLike = {
+  get(name: string): string | null;
 };
 
 const DEFAULT_FILTERS: CompanyFilters = {
@@ -57,11 +62,6 @@ function uniqueSorted(values: Array<string | undefined>) {
   return Array.from(new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value)))).sort(
     (a, b) => a.localeCompare(b, "pt-BR")
   );
-}
-
-function uniqueOrdered<T extends string>(values: Array<T | undefined>, reference: readonly T[]) {
-  const set = new Set(values.filter((value): value is T => Boolean(value)));
-  return reference.filter((value) => set.has(value));
 }
 
 export function getDefaultCompanyFilters(): CompanyFilters {
@@ -95,7 +95,7 @@ export function resolveTenureBand(tenureMonths?: number): TenureBand {
   return "3a-plus";
 }
 
-export function parseCompanyFiltersFromParams(params: URLSearchParams | ReadonlyURLSearchParams): CompanyFilters {
+export function parseCompanyFiltersFromParams(params: SearchParamsLike): CompanyFilters {
   return {
     team: normalizeText(params.get("team")),
     area: normalizeText(params.get("area")),
@@ -122,46 +122,31 @@ export function applyCompanyFiltersToParams(params: URLSearchParams, filters: Co
 }
 
 export function buildCompanyFilterOptions(responses: ResponseRecord[]): CompanyFilterOptions {
+  const allAreas = uniqueSorted(responses.map((response) => response.triage?.area));
+  const areasByTeam = responses.reduce<Record<string, string[]>>((acc, response) => {
+    const team = response.team?.trim();
+    const area = response.triage?.area?.trim();
+    if (!team || !area) return acc;
+    const current = new Set(acc[team] ?? []);
+    current.add(area);
+    acc[team] = Array.from(current).sort((a, b) => a.localeCompare(b, "pt-BR"));
+    return acc;
+  }, {});
+
   return {
     team: uniqueSorted(responses.map((response) => response.team)),
-    area: uniqueSorted(responses.map((response) => response.triage?.area)),
+    area: allAreas,
+    areasByTeam,
     tenureBand: ["ate-3m", "3-12m", "1-3a", "3a-plus"],
-    workModel: uniqueOrdered(
-      responses.map((response) => response.triage?.workModel),
-      ["presencial", "hibrido", "remoto"]
-    ),
-    leadership: uniqueOrdered(
-      responses.map((response) => response.triage?.leadership),
-      ["sim", "nao"]
-    ),
-    publicExposure: uniqueOrdered(
-      responses.map((response) => response.triage?.publicExposure),
-      ["alta", "media", "baixa"]
-    ),
-    recentOverload: uniqueOrdered(
-      responses.map((response) => response.triage?.recentOverload),
-      ["sim", "nao"]
-    ),
-    sleepQuality: uniqueOrdered(
-      responses.map((response) => response.triage?.sleepQuality),
-      ["boa", "regular", "ruim"]
-    ),
-    energyLevel: uniqueOrdered(
-      responses.map((response) => response.triage?.energyLevel),
-      ["preservada", "oscilando", "esgotada"]
-    ),
-    emotionalPressure: uniqueOrdered(
-      responses.map((response) => response.triage?.emotionalPressure),
-      ["baixa", "media", "alta"]
-    ),
-    motivationLevel: uniqueOrdered(
-      responses.map((response) => response.triage?.motivationLevel),
-      ["preservada", "oscilando", "reduzida"]
-    ),
-    socialIsolation: uniqueOrdered(
-      responses.map((response) => response.triage?.socialIsolation),
-      ["nao", "pontual", "frequente"]
-    ),
+    workModel: ["presencial", "hibrido", "remoto"],
+    leadership: ["sim", "nao"],
+    publicExposure: ["alta", "media", "baixa"],
+    recentOverload: ["sim", "nao"],
+    sleepQuality: ["boa", "regular", "ruim"],
+    energyLevel: ["preservada", "oscilando", "esgotada"],
+    emotionalPressure: ["baixa", "media", "alta"],
+    motivationLevel: ["preservada", "oscilando", "reduzida"],
+    socialIsolation: ["nao", "pontual", "frequente"],
   };
 }
 
