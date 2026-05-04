@@ -18,9 +18,12 @@ const heroImpactData = [
   { month: "Jun", bemEstar: 87, desempenho: 91 },
 ];
 
+const HERO_WELLBEING_COLOR = "#2f8f8a";
+const HERO_PERFORMANCE_COLOR = "#18486f";
+
 const heroImpactChartConfig = {
-  bemEstar: { label: "Bem-estar do time", color: "var(--brand-teal)" },
-  desempenho: { label: "Performance percebida", color: "var(--primary)" },
+  bemEstar: { label: "Bem-estar do time", color: HERO_WELLBEING_COLOR },
+  desempenho: { label: "Performance percebida", color: HERO_PERFORMANCE_COLOR },
 } satisfies ChartConfig;
 
 const benefits = [
@@ -265,12 +268,12 @@ function HeroAreaChart() {
         <AreaChart data={heroImpactData} margin={{ left: 0, right: 0, top: 10, bottom: 0 }}>
           <defs>
             <linearGradient id="heroWellbeingFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="var(--color-bemEstar)" stopOpacity={0.3} />
-              <stop offset="100%" stopColor="var(--color-bemEstar)" stopOpacity={0.02} />
+              <stop offset="0%" stopColor={HERO_WELLBEING_COLOR} stopOpacity={0.3} />
+              <stop offset="100%" stopColor={HERO_WELLBEING_COLOR} stopOpacity={0.02} />
             </linearGradient>
             <linearGradient id="heroPerformanceFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="var(--color-desempenho)" stopOpacity={0.2} />
-              <stop offset="100%" stopColor="var(--color-desempenho)" stopOpacity={0.02} />
+              <stop offset="0%" stopColor={HERO_PERFORMANCE_COLOR} stopOpacity={0.2} />
+              <stop offset="100%" stopColor={HERO_PERFORMANCE_COLOR} stopOpacity={0.02} />
             </linearGradient>
           </defs>
           <CartesianGrid vertical={false} />
@@ -279,17 +282,17 @@ function HeroAreaChart() {
           <ChartTooltip content={<ChartTooltipContent formatter={(value) => `${value}%`} />} />
           <Area
             type="monotone"
-            dataKey="bemEstar"
-            stroke="var(--color-bemEstar)"
-            fill="url(#heroWellbeingFill)"
-            strokeWidth={1.8}
+            dataKey="desempenho"
+            stroke={HERO_PERFORMANCE_COLOR}
+            fill="url(#heroPerformanceFill)"
+            strokeWidth={1.5}
           />
           <Area
             type="monotone"
-            dataKey="desempenho"
-            stroke="var(--color-desempenho)"
-            fill="url(#heroPerformanceFill)"
-            strokeWidth={1.5}
+            dataKey="bemEstar"
+            stroke={HERO_WELLBEING_COLOR}
+            fill="url(#heroWellbeingFill)"
+            strokeWidth={1.8}
           />
         </AreaChart>
       </ChartContainer>

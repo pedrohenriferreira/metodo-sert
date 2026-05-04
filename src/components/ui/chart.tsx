@@ -95,6 +95,19 @@ export function ChartTooltipContent({
 
   if (!active || !payload?.length) return null;
 
+  const configKeys = Object.keys(config);
+  const sortedPayload = [...payload].sort((left, right) => {
+    const leftKey = String(left.dataKey ?? left.name ?? "");
+    const rightKey = String(right.dataKey ?? right.name ?? "");
+    const leftIndex = configKeys.indexOf(leftKey);
+    const rightIndex = configKeys.indexOf(rightKey);
+
+    if (leftIndex === -1 && rightIndex === -1) return 0;
+    if (leftIndex === -1) return 1;
+    if (rightIndex === -1) return -1;
+    return leftIndex - rightIndex;
+  });
+
   return (
     <div className={cn("min-w-[180px] rounded-2xl border border-[var(--border)] bg-white/96 px-3 py-2 shadow-xl", className)}>
       {!hideLabel && (
@@ -103,11 +116,11 @@ export function ChartTooltipContent({
         </div>
       )}
       <div className="space-y-2">
-        {payload.map((item: TooltipPayloadItem, index: number) => {
+        {sortedPayload.map((item: TooltipPayloadItem, index: number) => {
           const key = String(item.dataKey ?? item.name ?? index);
           const entry = config[key] ?? config[String(item.name)] ?? {};
           const itemLabel = entry.label ?? item.name;
-          const itemValue = formatter ? formatter(item.value, item.name, item, index, payload) : item.value;
+          const itemValue = formatter ? formatter(item.value, item.name, item, index, sortedPayload) : item.value;
 
           return (
             <div key={key} className="flex items-center justify-between gap-3 text-sm">
