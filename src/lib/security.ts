@@ -46,6 +46,13 @@ function getAdminSessionSecret() {
   return process.env.ADMIN_SESSION_SECRET || process.env.ADMIN_KEY || "unsafe-dev-secret";
 }
 
+export function getAdminCredentials() {
+  return {
+    user: process.env.ADMIN_USER || "admin",
+    password: process.env.ADMIN_PASS || process.env.ADMIN_KEY || "changeme",
+  };
+}
+
 function sign(value: string) {
   return createHmac("sha256", getAdminSessionSecret()).update(value).digest("base64url");
 }

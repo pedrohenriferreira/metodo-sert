@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { applyRateLimit, auditLog, createAdminSessionCookie, createAuditContext } from "@/lib/security";
+import {
+  applyRateLimit,
+  auditLog,
+  createAdminSessionCookie,
+  createAuditContext,
+  getAdminCredentials,
+} from "@/lib/security";
 import { getValidationMessage, loginSchema } from "@/lib/validation";
-
-const ADMIN_USER = process.env.ADMIN_USER || "admin";
-const ADMIN_PASS = process.env.ADMIN_PASS || process.env.ADMIN_KEY || "changeme";
 
 export async function POST(request: NextRequest) {
   const auditContext = createAuditContext(request);
@@ -26,8 +29,9 @@ export async function POST(request: NextRequest) {
   }
 
   const { user, password } = parsedBody;
+  const adminCredentials = getAdminCredentials();
 
-  if (user !== ADMIN_USER || password !== ADMIN_PASS) {
+  if (user !== adminCredentials.user || password !== adminCredentials.password) {
     auditLog("warn", "admin.login.failed", { ...auditContext, user });
     return NextResponse.json({ error: "Credenciais inválidas" }, { status: 401 });
   }

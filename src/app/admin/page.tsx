@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ComponentType, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, ArrowUpRight, Building2, LogOut, Plus, Shield, Siren, Trash2, Users } from "lucide-react";
+import { Activity, ArrowUpRight, Building2, KeyRound, LogOut, Plus, Settings2, Shield, Siren, Trash2, Users } from "lucide-react";
+import { BrandLogo } from "@/components/branding/logo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -78,6 +79,10 @@ type RequestCompaniesResult =
   | { ok: true; companies: CompanyRow[] }
   | { ok: false; error: string };
 
+type LoadCompaniesResult =
+  | { ok: true; companies: CompanyRow[] }
+  | { ok: false; error: string };
+
 async function requestCompanies(retryCount = 0): Promise<RequestCompaniesResult> {
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), 8000);
@@ -99,11 +104,11 @@ async function requestCompanies(retryCount = 0): Promise<RequestCompaniesResult>
       if (res.status >= 500) {
         return {
           ok: false as const,
-          error: "O painel conseguiu autenticar, mas nao conseguiu consultar a base de dados da administracao.",
+          error: "O painel conseguiu autenticar, mas não conseguiu consultar a base de dados da administração.",
         };
       }
 
-      return { ok: false as const, error: "Sua sessao administrativa nao foi reconhecida." };
+      return { ok: false as const, error: "Sua sessão administrativa não foi reconhecida." };
     }
 
     const data = (await res.json()) as CompaniesResponse;
@@ -112,13 +117,13 @@ async function requestCompanies(retryCount = 0): Promise<RequestCompaniesResult>
     if (error instanceof DOMException && error.name === "AbortError") {
       return {
         ok: false as const,
-        error: "A consulta do painel demorou demais para responder. Isso normalmente indica indisponibilidade da conexao com o banco.",
+        error: "A consulta do painel demorou demais para responder. Isso normalmente indica indisponibilidade da conexão com o banco.",
       };
     }
 
     return {
       ok: false as const,
-      error: "Nao foi possivel carregar o painel administrativo por falha de rede ou servidor.",
+      error: "Não foi possível carregar o painel administrativo por falha de rede ou servidor.",
     };
   } finally {
     window.clearTimeout(timeoutId);
@@ -186,7 +191,7 @@ export default function AdminPage() {
     setStatus("Carregando...");
     const result = await fetchCompanies();
     if (loadId !== latestLoadId.current) {
-      return false;
+      return { ok: false as const, error: "Carregamento descartado por uma nova solicitação." };
     }
 
     if (!result.ok) {
@@ -194,14 +199,14 @@ export default function AdminPage() {
       setStatus("Falha ao carregar empresas. Refaça login.");
       setAuthed(false);
       setCheckingSession(false);
-      return false;
+      return result;
     }
 
     setCompanies(result.companies);
     setStatus(null);
     setAuthed(true);
     setCheckingSession(false);
-    return true;
+    return { ok: true as const, companies: result.companies };
   }, [fetchCompanies]);
 
   useEffect(() => {
@@ -239,7 +244,7 @@ export default function AdminPage() {
           const data = (await res.json()) as { error?: string };
           message = data.error ?? message;
         } catch {
-          message = "Nao foi possivel concluir o login agora.";
+          message = "Não foi possível concluir o login agora.";
         }
         setAuthError(message);
         setCheckingSession(false);
@@ -249,12 +254,12 @@ export default function AdminPage() {
 
       setLoading(false);
       setPassword("");
-      const loaded = await loadCompanies();
-      if (!loaded) {
-        setAuthError("Login aceito, mas a sessao nao ficou disponivel no painel. Se voce acabou de mudar o .env.local, reinicie o servidor e tente novamente.");
+      const loaded = (await loadCompanies()) as LoadCompaniesResult;
+      if (!loaded.ok) {
+        setAuthError(loaded.error);
       }
     } catch {
-      setAuthError("Nao foi possivel conectar ao servidor de autenticacao.");
+      setAuthError("Não foi possível conectar ao servidor de autenticação.");
       setCheckingSession(false);
       setLoading(false);
     }
@@ -365,17 +370,20 @@ export default function AdminPage() {
   if (!authed) {
     return (
       <div className="shell-page flex min-h-screen items-center justify-center px-6">
-        <Card className="w-full max-w-md px-2 py-3 shadow-[0_24px_64px_rgba(129,155,179,0.18)]">
+        <Card className="w-full max-w-md px-2 py-3 shadow-[0_24px_64px_rgba(19,34,56,0.12)]">
           <CardHeader>
             <div className="flex justify-center">
+              <BrandLogo />
+            </div>
+            <div className="mt-4 flex justify-center">
               <span className="hero-pill hero-pill--dark">
                 <Shield className="h-3.5 w-3.5" />
-                Painel operacional
+                Painel administrativo
               </span>
             </div>
-            <CardTitle className="mt-4 text-center text-4xl tracking-[-0.05em]">Acesso Administrativo</CardTitle>
+            <CardTitle className="mt-4 text-center text-4xl tracking-[-0.05em]">Acesso administrativo</CardTitle>
             <CardDescription className="mt-3 text-center text-base leading-7">
-              Acesso ao painel de geração de tokens e dashboards organizacionais.
+              Governança de empresas, tokens, triagens e alertas em uma única operação segura.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -425,18 +433,53 @@ export default function AdminPage() {
 
   return (
     <div className="shell-page min-h-screen px-6 py-10 text-[var(--foreground)]">
-      <div className="mx-auto max-w-7xl space-y-8">
-        <Card className="overflow-hidden border-[rgba(106,161,160,0.18)] bg-[linear-gradient(135deg,rgba(255,255,255,0.94),rgba(238,246,246,0.88))] shadow-[0_24px_60px_rgba(129,155,179,0.14)]">
-          <CardContent className="grid gap-8 p-6 xl:grid-cols-[minmax(0,1.2fr)_auto] xl:items-start lg:p-8">
+      <div className="mx-auto grid max-w-[1520px] gap-6 xl:grid-cols-[260px_minmax(0,1fr)]">
+        <aside className="dark-panel sticky top-6 hidden h-fit rounded-[2rem] p-5 xl:block">
+          <div className="space-y-6">
+            <BrandLogo theme="dark" compact />
+            <div className="space-y-2">
+              {[
+                { label: "Empresas", icon: Building2, active: true },
+                { label: "Tokens", icon: KeyRound },
+                { label: "Triagens", icon: Activity },
+                { label: "Dashboard", icon: Activity },
+                { label: "Alertas", icon: Siren },
+                { label: "Usuários", icon: Users },
+                { label: "Auditoria", icon: Shield },
+                { label: "Configurações", icon: Settings2 },
+              ].map((item) => (
+                <div
+                  key={item.label}
+                  className={`flex items-center gap-3 rounded-[1.2rem] px-4 py-3 text-sm ${
+                    item.active ? "bg-white text-[var(--primary)]" : "glass-outline text-white/72"
+                  }`}
+                >
+                  <item.icon className="h-4 w-4" />
+                  {item.label}
+                </div>
+              ))}
+            </div>
+            <div className="rounded-[1.6rem] glass-outline p-4 text-sm text-white/72">
+              <p className="font-medium text-white">Cobertura geral</p>
+              <p className="mt-3 text-3xl font-semibold tracking-[-0.04em]">{respondents.length ? "91%" : "--"}</p>
+              <p className="mt-2 text-white/56">Painel pensado para decisões rápidas e rastreáveis.</p>
+            </div>
+          </div>
+        </aside>
+
+        <div className="space-y-8">
+          <Card className="overflow-hidden border-[rgba(24,72,111,0.08)] bg-[linear-gradient(135deg,rgba(255,255,255,0.96),rgba(233,243,243,0.9))] shadow-[0_24px_60px_rgba(19,34,56,0.10)]">
+            <CardContent className="grid gap-8 p-6 xl:grid-cols-[minmax(0,1.2fr)_auto] xl:items-start lg:p-8">
             <div className="space-y-5">
+              <BrandLogo compact />
               <span className="hero-pill hero-pill--dark">
                 <Shield className="h-3.5 w-3.5" />
                 Painel operacional
               </span>
               <div className="space-y-3">
-                <h1 className="text-4xl font-semibold tracking-[-0.05em] md:text-5xl">Gestão Método Sert</h1>
+                <h1 className="text-4xl font-semibold tracking-[-0.05em] md:text-5xl">Gestão institucional Método Sert</h1>
                 <p className="max-w-3xl text-base leading-8 text-[var(--muted-foreground)]">
-                  Centralize a operação das empresas, gere acessos, distribua o token de análise para diretoria e RH e acompanhe os casos que pedem leitura clínica mais rápida.
+                  Centralize empresas, tokens, triagens e alertas clínicos em uma operação visualmente madura, confiável e pronta para contas corporativas.
                 </p>
               </div>
             </div>
@@ -452,14 +495,14 @@ export default function AdminPage() {
           </CardContent>
         </Card>
 
-        <div className="grid gap-5 md:grid-cols-3">
+          <div className="grid gap-5 md:grid-cols-3">
           <SummaryCard label="Empresas ativas" value={`${companies.length}`} helper="Bases disponíveis no painel" icon={Building2} />
           <SummaryCard label="Leituras processadas" value={`${respondents.length}`} helper="Volumetria total respondida" icon={Activity} />
           <SummaryCard label="Casos de alta atenção" value={`${criticalCount + highAttentionCount}`} helper="Crítico + atenção alta" icon={Siren} critical />
-        </div>
+          </div>
 
-        <div className="space-y-6">
-          <Card className="overflow-hidden border-[rgba(106,161,160,0.16)]">
+          <div className="space-y-6">
+            <Card className="overflow-hidden border-[rgba(24,72,111,0.08)]">
             <CardHeader className="space-y-3">
               <div className="inline-flex w-fit items-center gap-2 rounded-full border border-[rgba(106,161,160,0.18)] bg-[rgba(106,161,160,0.08)] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--primary)]">
                 <Plus className="h-3.5 w-3.5" />
@@ -491,7 +534,7 @@ export default function AdminPage() {
             </CardContent>
           </Card>
 
-          <Card className="overflow-hidden border-[rgba(136,163,191,0.18)] shadow-[0_22px_54px_rgba(129,155,179,0.12)]">
+            <Card className="overflow-hidden border-[rgba(24,72,111,0.08)] shadow-[0_22px_54px_rgba(19,34,56,0.08)]">
             <CardHeader className="space-y-4 border-b border-[var(--border)] bg-[rgba(255,255,255,0.55)]">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
                 <div className="space-y-2">
@@ -814,7 +857,8 @@ export default function AdminPage() {
                 </TabsContent>
               </Tabs>
             </CardContent>
-          </Card>
+            </Card>
+          </div>
         </div>
       </div>
     </div>

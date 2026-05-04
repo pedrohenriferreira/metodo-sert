@@ -1,27 +1,33 @@
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { LegalReturnButton } from "@/components/legal-return-button";
 
 export default async function TermosDeUsoPage({
   searchParams,
 }: {
-  searchParams: Promise<{ token?: string }>;
+  searchParams: Promise<{ token?: string; source?: string }>;
 }) {
   const params = await searchParams;
   const token = params.token ?? "";
-  const returnHref = token ? `/form?token=${encodeURIComponent(token)}&step=legal` : "/form";
+  const source = params.source === "form" ? "form" : token ? "form" : "landing";
+  const returnHref =
+    source === "landing"
+      ? "/"
+      : token
+        ? `/form?token=${encodeURIComponent(token)}&step=legal`
+        : "/form";
+  const siblingHref =
+    source === "landing"
+      ? "/politica-de-privacidade?source=landing"
+      : token
+        ? `/politica-de-privacidade?token=${encodeURIComponent(token)}&source=form`
+        : "/politica-de-privacidade?source=form";
 
   return (
     <main className="shell-page min-h-screen px-5 py-10 md:px-8 lg:px-10 lg:py-14">
       <div className="mx-auto max-w-4xl space-y-6">
         <div>
-          <Link href={returnHref}>
-            <Button variant="outline">
-              <ArrowLeft className="h-4 w-4" />
-              Voltar ao formulário
-            </Button>
-          </Link>
+          <LegalReturnButton fallbackHref={returnHref} label="Voltar" />
         </div>
         <Card>
           <CardHeader>
@@ -54,7 +60,7 @@ export default async function TermosDeUsoPage({
             </p>
             <p>
               <Link
-                href={token ? `/politica-de-privacidade?token=${encodeURIComponent(token)}` : "/politica-de-privacidade"}
+                href={siblingHref}
                 className="font-semibold text-[var(--foreground)] underline-offset-4 hover:underline"
               >
                 Ir para Política de Privacidade

@@ -2,6 +2,7 @@
 
 ## Onboarding admin
 1. Configurar `.env.local` com banco, segredo de sessao e credenciais admin.
+1.1. Se o fluxo de demonstracao for usado, configurar SMTP (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM_EMAIL`) ou `DEMO_REQUEST_WEBHOOK_URL`.
 2. Rodar `npx prisma generate`.
 3. Rodar `npm run db:push`.
 4. Entrar em `/admin` com `ADMIN_USER` e `ADMIN_PASS`.
@@ -24,7 +25,7 @@
 - Falha de token:
   revisar `Token` no painel e, se preciso, resetar token individual.
 - Falha de envio:
-  verificar logs do servidor, `AuditEvent` e `GET /api/health`.
+  verificar logs do servidor, `AuditEvent`, configuracao SMTP/webhook e `GET /api/health`.
 - Falha de acesso admin:
   reiniciar app e validar `.env.local`.
 

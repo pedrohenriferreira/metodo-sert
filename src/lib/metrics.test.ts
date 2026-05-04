@@ -1,3 +1,4 @@
+import { describe, expect, it } from "vitest";
 import { computeMetrics, summarizeResponseRisk } from "@/lib/metrics";
 import { questions } from "@/lib/questions";
 import type { ResponseRecord } from "@/lib/storage";

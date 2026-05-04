@@ -39,6 +39,20 @@ export type NarrativeInsight = {
   tone: InsightTone;
 };
 
+export type BenchmarkMetric = {
+  label: string;
+  currentValue: number;
+  baselineValue: number;
+  delta: number;
+  format: "percent" | "score" | "count";
+};
+
+export type SampleAlert = {
+  title: string;
+  detail: string;
+  tone: InsightTone;
+};
+
 export type IndicatorMetric = {
   key: IndicatorKey;
   label: string;
@@ -89,10 +103,37 @@ export type SegmentSnapshot = {
   topDimension: Dimension;
 };
 
+export type CriticalSegment = {
+  id: string;
+  label: string;
+  kind: ComparisonGroupKind;
+  count: number;
+  riskBand: RiskBand;
+  overallMedian: number;
+  weakestDimension: Dimension;
+};
+
 export type HeatmapRow = {
   label: string;
   count: number;
   values: Array<{ dimension: Dimension; score: number }>;
+};
+
+export type ComparisonGroupKind = "team" | "role" | "area";
+
+export type ComparisonGroup = {
+  id: string;
+  kind: ComparisonGroupKind;
+  label: string;
+  shortLabel: string;
+  count: number;
+  overallMedian: number;
+  wellbeingIndex: number;
+  burnoutRiskShare: number;
+  anxietyRiskShare: number;
+  riskBand: RiskBand;
+  weakestDimension: Dimension;
+  dimensionScores: DimensionScore[];
 };
 
 export type CompanyView = {
@@ -118,23 +159,31 @@ export type CompanyView = {
   pathologyHeatmap: PathologyHeatmapRow[];
   technicalResponseRows: TechnicalResponseRow[];
   technicalHeatmap: HeatmapRow[];
+  comparisonGroups: ComparisonGroup[];
   highRiskShare: number;
   overloadShare: number;
   sleepRiskShare: number;
   conditionPrevalence: ConditionSignal[];
   executiveSummary: NarrativeInsight[];
   priorityInsights: NarrativeInsight[];
+  diagnosticHypotheses: NarrativeInsight[];
+  benchmarkMetrics: BenchmarkMetric[];
+  sampleAlerts: SampleAlert[];
+  criticalSegments: CriticalSegment[];
 };
 
 export type TechnicalResponseRow = {
   id: string;
+  pseudonymId?: string;
   submittedAt: string;
   team?: string;
   role?: string;
+  area?: string;
   overallAverage: number;
   riskBand: RiskBand;
   weakestDimension: Dimension;
   strongestDimension: Dimension;
+  protectedGroup: boolean;
   recentOverload?: TriageData["recentOverload"];
   sleepQuality?: TriageData["sleepQuality"];
   workModel?: TriageData["workModel"];
@@ -219,6 +268,15 @@ function inverseScore(score: number) {
 function percent(part: number, total: number) {
   if (!total) return 0;
   return round((part / total) * 100);
+}
+
+function countByNormalizedValue(values: Array<string | undefined>) {
+  return values.reduce<Record<string, number>>((acc, value) => {
+    const normalized = value?.trim();
+    if (!normalized) return acc;
+    acc[normalized] = (acc[normalized] ?? 0) + 1;
+    return acc;
+  }, {});
 }
 
 function triageWeight(value: string | undefined, weights: Record<string, number>) {
@@ -627,23 +685,274 @@ function buildPathologyHeatmap(perResponse: Array<ReturnType<typeof computePerRe
     groups.set(label, rows);
   });
 
-  return Array.from(groups.entries())
-    .map(([label, rows]) => {
-      const indicators = rows.map(getIndicatorMap);
+  const visibleRows: PathologyHeatmapRow[] = [];
+  const protectedRows: Array<ReturnType<typeof computePerResponse>> = [];
+
+  Array.from(groups.entries()).forEach(([label, rows]) => {
+    if (rows.length < 3) {
+      protectedRows.push(...rows);
+      return;
+    }
+
+    const indicators = rows.map(getIndicatorMap);
+    visibleRows.push({
+      label,
+      count: rows.length,
+      values: [
+        { category: "burnout" as const, score: round(mean(indicators.map((item) => item.burnout))) },
+        { category: "anxiety" as const, score: round(mean(indicators.map((item) => item.anxiety))) },
+        { category: "depression" as const, score: round(mean(indicators.map((item) => item.depression))) },
+        { category: "stress" as const, score: round(mean(indicators.map((item) => item.stress))) },
+        { category: "satisfaction" as const, score: round(mean(indicators.map((item) => item.satisfaction))) },
+      ],
+    });
+  });
+
+  if (protectedRows.length) {
+    const indicators = protectedRows.map(getIndicatorMap);
+    visibleRows.push({
+      label: "Grupos protegidos (<3)",
+      count: protectedRows.length,
+      values: [
+        { category: "burnout" as const, score: round(mean(indicators.map((item) => item.burnout))) },
+        { category: "anxiety" as const, score: round(mean(indicators.map((item) => item.anxiety))) },
+        { category: "depression" as const, score: round(mean(indicators.map((item) => item.depression))) },
+        { category: "stress" as const, score: round(mean(indicators.map((item) => item.stress))) },
+        { category: "satisfaction" as const, score: round(mean(indicators.map((item) => item.satisfaction))) },
+      ],
+    });
+  }
+
+  return visibleRows
+    .map((row) => {
       return {
-        label,
-        count: rows.length,
-        values: [
-          { category: "burnout" as const, score: round(mean(indicators.map((item) => item.burnout))) },
-          { category: "anxiety" as const, score: round(mean(indicators.map((item) => item.anxiety))) },
-          { category: "depression" as const, score: round(mean(indicators.map((item) => item.depression))) },
-          { category: "stress" as const, score: round(mean(indicators.map((item) => item.stress))) },
-          { category: "satisfaction" as const, score: round(mean(indicators.map((item) => item.satisfaction))) },
-        ],
+        ...row,
       } satisfies PathologyHeatmapRow;
     })
     .sort((a, b) => b.count - a.count)
     .slice(0, 8);
+}
+
+function buildComparisonGroups(perResponse: Array<ReturnType<typeof computePerResponse>>) {
+  const grouped = new Map<string, { kind: ComparisonGroupKind; value: string; rows: Array<ReturnType<typeof computePerResponse>> }>();
+
+  perResponse.forEach((item) => {
+    const candidates = [
+      item.response.team ? { kind: "team" as const, value: item.response.team.trim() } : null,
+      item.response.role ? { kind: "role" as const, value: item.response.role.trim() } : null,
+      item.response.triage?.area ? { kind: "area" as const, value: item.response.triage.area.trim() } : null,
+    ].filter((candidate): candidate is { kind: ComparisonGroupKind; value: string } => Boolean(candidate?.value));
+
+    candidates.forEach((candidate) => {
+      const key = `${candidate.kind}:${candidate.value}`;
+      const current = grouped.get(key) ?? { kind: candidate.kind, value: candidate.value, rows: [] };
+      current.rows.push(item);
+      grouped.set(key, current);
+    });
+  });
+
+  return Array.from(grouped.values())
+    .filter((group) => group.rows.length >= 1)
+    .map((group) => {
+      const overallMedian = round(median(group.rows.map((row) => row.overallAverage)));
+      const dimensions = buildCompanyDimensions(group.rows).sort((a, b) => a.median - b.median);
+      const burnoutRiskShare = percent(
+        group.rows.filter((row) => getIndicatorMap(row).burnout >= 60).length,
+        group.rows.length
+      );
+      const anxietyRiskShare = percent(
+        group.rows.filter((row) => getIndicatorMap(row).anxiety >= 60).length,
+        group.rows.length
+      );
+      const kindLabel =
+        group.kind === "team" ? "Time" : group.kind === "role" ? "Função" : "Área";
+
+      return {
+        id: `${group.kind}:${group.value}`,
+        kind: group.kind,
+        label: `${kindLabel}: ${group.value}`,
+        shortLabel: group.value,
+        count: group.rows.length,
+        overallMedian,
+        wellbeingIndex: round((overallMedian / 5) * 100),
+        burnoutRiskShare,
+        anxietyRiskShare,
+        riskBand: getRiskBand(overallMedian),
+        weakestDimension: dimensions[0]?.dimension ?? "Demanda e Ritmo",
+        dimensionScores: dimensions,
+      } satisfies ComparisonGroup;
+    })
+    .sort((a, b) => {
+      if (b.count !== a.count) return b.count - a.count;
+      if (a.kind !== b.kind) return a.kind.localeCompare(b.kind);
+      return a.shortLabel.localeCompare(b.shortLabel, "pt-BR");
+    });
+}
+
+function buildBenchmarkMetrics(currentResponses: Array<ReturnType<typeof computePerResponse>>, baselineResponses: Array<ReturnType<typeof computePerResponse>>) {
+  const currentIndicators = buildIndicatorBars(currentResponses);
+  const baselineIndicators = buildIndicatorBars(baselineResponses);
+  const currentWellbeingIndex = round((median(currentResponses.map((item) => item.overallAverage)) / 5) * 100);
+  const baselineWellbeingIndex = round((median(baselineResponses.map((item) => item.overallAverage)) / 5) * 100);
+  const currentHighRiskShare = percent(
+    currentResponses.filter((item) => item.riskBand === "Atenção alta" || item.riskBand === "Crítico").length,
+    currentResponses.length
+  );
+  const baselineHighRiskShare = percent(
+    baselineResponses.filter((item) => item.riskBand === "Atenção alta" || item.riskBand === "Crítico").length,
+    baselineResponses.length
+  );
+
+  return [
+    {
+      label: "Pessoas no recorte",
+      currentValue: currentResponses.length,
+      baselineValue: baselineResponses.length,
+      delta: currentResponses.length - baselineResponses.length,
+      format: "count",
+    },
+    {
+      label: "Bem-estar",
+      currentValue: currentWellbeingIndex,
+      baselineValue: baselineWellbeingIndex,
+      delta: currentWellbeingIndex - baselineWellbeingIndex,
+      format: "percent",
+    },
+    {
+      label: "Burnout alto",
+      currentValue: currentIndicators.find((item) => item.key === "burnout")?.value ?? 0,
+      baselineValue: baselineIndicators.find((item) => item.key === "burnout")?.value ?? 0,
+      delta:
+        (currentIndicators.find((item) => item.key === "burnout")?.value ?? 0) -
+        (baselineIndicators.find((item) => item.key === "burnout")?.value ?? 0),
+      format: "percent",
+    },
+    {
+      label: "Ansiedade alta",
+      currentValue: currentIndicators.find((item) => item.key === "anxiety")?.value ?? 0,
+      baselineValue: baselineIndicators.find((item) => item.key === "anxiety")?.value ?? 0,
+      delta:
+        (currentIndicators.find((item) => item.key === "anxiety")?.value ?? 0) -
+        (baselineIndicators.find((item) => item.key === "anxiety")?.value ?? 0),
+      format: "percent",
+    },
+    {
+      label: "Alta atenção + crítico",
+      currentValue: currentHighRiskShare,
+      baselineValue: baselineHighRiskShare,
+      delta: currentHighRiskShare - baselineHighRiskShare,
+      format: "percent",
+    },
+  ] satisfies BenchmarkMetric[];
+}
+
+function buildSampleAlerts(args: {
+  totalResponses: number;
+  comparisonGroups: ComparisonGroup[];
+  criticalSegments: CriticalSegment[];
+}) {
+  const alerts: SampleAlert[] = [];
+
+  if (args.totalResponses < 5) {
+    alerts.push({
+      title: "Amostra geral reduzida",
+      detail: "O recorte atual ainda tem menos de 5 respostas. Use os sinais como tendência inicial, não como fechamento conclusivo.",
+      tone: "attention",
+    });
+  } else if (args.totalResponses < 10) {
+    alerts.push({
+      title: "Amostra geral em consolidação",
+      detail: "A leitura já orienta priorização, mas a estabilidade analítica melhora quando o recorte supera 10 respostas.",
+      tone: "neutral",
+    });
+  }
+
+  const smallGroups = args.comparisonGroups.filter((group) => group.count < 3);
+  if (smallGroups.length) {
+    alerts.push({
+      title: "Grupos pequenos protegidos",
+      detail: `${smallGroups.length} grupo(s) com menos de 3 respostas entram com leitura restrita ou agregada para reduzir risco de identificação indireta.`,
+      tone: "neutral",
+    });
+  }
+
+  if (!args.criticalSegments.length) {
+    alerts.push({
+      title: "Sem recortes críticos comparáveis",
+      detail: "Ainda não há grupos suficientes com base mínima para formar um ranking confiável de criticidade por segmento.",
+      tone: "neutral",
+    });
+  }
+
+  return alerts.slice(0, 3);
+}
+
+function buildCriticalSegments(comparisonGroups: ComparisonGroup[]) {
+  return comparisonGroups
+    .filter((group) => group.count >= 3)
+    .sort((a, b) => {
+      if (a.overallMedian !== b.overallMedian) return a.overallMedian - b.overallMedian;
+      return b.count - a.count;
+    })
+    .slice(0, 3)
+    .map((group) => ({
+      id: group.id,
+      label: group.label,
+      kind: group.kind,
+      count: group.count,
+      riskBand: group.riskBand,
+      overallMedian: group.overallMedian,
+      weakestDimension: group.weakestDimension,
+    }) satisfies CriticalSegment);
+}
+
+function buildDiagnosticHypotheses(args: {
+  weakestDimension: Dimension;
+  burnoutRiskShare: number;
+  anxietyRiskShare: number;
+  overloadShare: number;
+  topTendency?: ConditionSignal;
+  responses: ResponseRecord[];
+}) {
+  const { anxietyRiskShare, burnoutRiskShare, overloadShare, responses, topTendency, weakestDimension } = args;
+  const leadershipShare = percent(
+    responses.filter((response) => response.triage?.leadership === "sim").length,
+    responses.length
+  );
+  const isolationShare = percent(
+    responses.filter(
+      (response) =>
+        response.triage?.socialIsolation === "pontual" || response.triage?.socialIsolation === "frequente"
+    ).length,
+    responses.length
+  );
+
+  return [
+    {
+      title: "Sinal mais compatível com sobrecarga",
+      detail:
+        overloadShare >= 35 || weakestDimension === "Demanda e Ritmo" || burnoutRiskShare >= anxietyRiskShare
+          ? `O recorte atual combina pressão em demanda e ritmo com ${overloadShare.toFixed(0)}% de relatos de sobrecarga recente, sugerindo desgaste operacional como hipótese principal.`
+          : "A sobrecarga não aparece como hipótese dominante neste recorte, mas ainda merece monitoramento em grupos de maior pressão.",
+      tone: overloadShare >= 35 ? "attention" : "neutral",
+    },
+    {
+      title: "Sinal mais compatível com liderança",
+      detail:
+        leadershipShare >= 25
+          ? `${leadershipShare.toFixed(0)}% do recorte está em posições de liderança formal. Vale comparar gestores e não gestores para separar problema de gestão, cascata de pressão e base operacional.`
+          : "A base atual tem pouca presença de liderança formal. O recorte sugere investigar mais a operação e o desenho do trabalho do que o nível gestor isoladamente.",
+      tone: leadershipShare >= 25 ? "neutral" : "positive",
+    },
+    {
+      title: "Sinal mais compatível com isolamento",
+      detail:
+        isolationShare >= 30 || topTendency?.name.includes("isolamento")
+          ? `${isolationShare.toFixed(0)}% do grupo relata isolamento pontual ou frequente, o que reforça hipótese de desconexão relacional e menor segurança psicológica.`
+          : "O isolamento não aparece como vetor dominante nesta leitura. O principal peso hoje parece estar mais em carga, pressão e organização do trabalho.",
+      tone: isolationShare >= 30 ? "attention" : "neutral",
+    },
+  ] satisfies NarrativeInsight[];
 }
 
 function buildCompanyInsights(args: { dimensionScores: DimensionScore[]; tendencies: ConditionSignal[]; riskDistribution: RiskDistributionItem[]; totalResponses: number; }) {
@@ -704,12 +1013,12 @@ function buildExecutiveSummary(args: {
   const summary: NarrativeInsight[] = [
     {
       title: "Recorte em foco",
-      detail: `${totalResponses} respostas compoem a leitura atual, com ${highRiskShare.toFixed(0)}% da base em alta atencao ou criticidade.`,
+      detail: `${totalResponses} respostas compõem a leitura atual, com ${highRiskShare.toFixed(0)}% da base em alta atenção ou criticidade.`,
       tone: highRiskShare >= 35 ? "attention" : "neutral",
     },
     {
-      title: "Eixo mais sensivel",
-      detail: `${weakestDimension} e a dimensao que mais puxa o resultado para baixo neste recorte.`,
+      title: "Eixo mais sensível",
+      detail: `${weakestDimension} é a dimensão que mais puxa o resultado para baixo neste recorte.`,
       tone: "attention",
     },
   ];
@@ -717,7 +1026,7 @@ function buildExecutiveSummary(args: {
   if (topTendency) {
     summary.push({
       title: "Sinal contextual dominante",
-      detail: `${topTendency.name} aparece como o sinal mais prevalente e ajuda a explicar a concentracao do risco.`,
+      detail: `${topTendency.name} aparece como o sinal mais prevalente e ajuda a explicar a concentração do risco.`,
       tone: topTendency.severity === "alto" ? "attention" : "neutral",
     });
   }
@@ -741,8 +1050,8 @@ function buildPriorityInsights(args: {
     title: "Prioridade 1",
     detail:
       highRiskShare >= 35
-        ? "Acione monitoramento mais proximo e conversa com lideranca, porque a concentracao de casos sensiveis ja pede resposta rapida."
-        : "Monitore o recorte com rotina curta de acompanhamento para evitar escalada nos grupos mais sensiveis.",
+        ? "Acione monitoramento mais próximo e conversa com liderança, porque a concentração de casos sensíveis já pede resposta rápida."
+        : "Monitore o recorte com rotina curta de acompanhamento para evitar escalada nos grupos mais sensíveis.",
     tone: highRiskShare >= 35 ? "attention" : "neutral",
   });
 
@@ -750,8 +1059,8 @@ function buildPriorityInsights(args: {
     title: "Prioridade 2",
     detail:
       weakestDimension === "Demanda e Ritmo" || overloadShare >= 35 || burnoutRiskShare >= anxietyRiskShare
-        ? "Revise carga, ritmo operacional e distribuicao do trabalho. O recorte sugere desgaste e sobrecarga como vetores relevantes."
-        : `Aprofunde o eixo ${weakestDimension}, porque ele esta concentrando a maior fragilidade do grupo filtrado.`,
+        ? "Revise carga, ritmo operacional e distribuição do trabalho. O recorte sugere desgaste e sobrecarga como vetores relevantes."
+        : `Aprofunde o eixo ${weakestDimension}, porque ele está concentrando a maior fragilidade do grupo filtrado.`,
     tone: "attention",
   });
 
@@ -759,16 +1068,17 @@ function buildPriorityInsights(args: {
     title: "Prioridade 3",
     detail:
       sleepRiskShare >= 35 || topTendency?.name.includes("Sono")
-        ? "Inclua recuperacao, descanso e fadiga na devolutiva para RH e lideranca. O recorte mostra desgaste sustentado."
-        : "Feche um plano de acao curto com responsaveis, prazo e nova leitura do mesmo recorte para comparar evolucao.",
+        ? "Inclua recuperação, descanso e fadiga na devolutiva para RH e liderança. O recorte mostra desgaste sustentado."
+        : "Feche um plano de ação curto com responsáveis, prazo e nova leitura do mesmo recorte para comparar evolução.",
     tone: sleepRiskShare >= 35 ? "attention" : "positive",
   });
 
   return priorities;
 }
 
-function buildCompanyView(responses: ResponseRecord[]): CompanyView {
+function buildCompanyView(responses: ResponseRecord[], baselineResponses: ResponseRecord[] = responses): CompanyView {
   const perResponse = responses.map(computePerResponse);
+  const baselinePerResponse = baselineResponses.map(computePerResponse);
   const dimensionScores = buildCompanyDimensions(perResponse);
   const sortedDimensions = [...dimensionScores].sort((a, b) => a.median - b.median);
   const overallAverages = perResponse.map((item) => item.overallAverage);
@@ -776,6 +1086,8 @@ function buildCompanyView(responses: ResponseRecord[]): CompanyView {
   const tendencies = buildConditionSignals(perResponse).slice(0, 6);
   const conditionPrevalence = buildConditionSignals(perResponse).slice(0, 6);
   const indicatorBars = buildIndicatorBars(perResponse);
+  const comparisonGroups = buildComparisonGroups(perResponse);
+  const criticalSegments = buildCriticalSegments(comparisonGroups);
   const wellbeingIndex = round((median(overallAverages) / 5) * 100);
   const satisfactionScore = indicatorBars.find((item) => item.key === "satisfaction")?.value ?? 0;
   const burnoutRiskShare = percent(perResponse.filter((item) => getIndicatorMap(item).burnout >= 60).length, perResponse.length);
@@ -809,6 +1121,23 @@ function buildCompanyView(responses: ResponseRecord[]): CompanyView {
     anxietyRiskShare,
     topTendency: tendencies[0],
   });
+  const diagnosticHypotheses = buildDiagnosticHypotheses({
+    weakestDimension: sortedDimensions[0]?.dimension ?? "Demanda e Ritmo",
+    burnoutRiskShare,
+    anxietyRiskShare,
+    overloadShare,
+    topTendency: tendencies[0],
+    responses,
+  });
+  const benchmarkMetrics = buildBenchmarkMetrics(perResponse, baselinePerResponse);
+  const sampleAlerts = buildSampleAlerts({
+    totalResponses: responses.length,
+    comparisonGroups,
+    criticalSegments,
+  });
+  const teamCounts = countByNormalizedValue(responses.map((response) => response.team));
+  const roleCounts = countByNormalizedValue(responses.map((response) => response.role));
+  const areaCounts = countByNormalizedValue(responses.map((response) => response.triage?.area));
 
   return {
     totalResponses: responses.length,
@@ -831,16 +1160,23 @@ function buildCompanyView(responses: ResponseRecord[]): CompanyView {
     riskDonut: buildRiskDonut(perResponse),
     wellbeingArea: buildWellbeingArea(perResponse),
     pathologyHeatmap: buildPathologyHeatmap(perResponse),
+    comparisonGroups,
     technicalResponseRows: perResponse
       .map((item) => ({
         id: item.response.id,
+        pseudonymId: item.response.pseudonymId,
         submittedAt: item.response.submittedAt,
         team: item.response.team,
         role: item.response.role,
+        area: item.response.triage?.area,
         overallAverage: item.overallAverage,
         riskBand: item.riskBand,
         weakestDimension: item.weakestDimension,
         strongestDimension: item.strongestDimension,
+        protectedGroup:
+          (item.response.team ? (teamCounts[item.response.team.trim()] ?? 0) < 3 : false) ||
+          (item.response.role ? (roleCounts[item.response.role.trim()] ?? 0) < 3 : false) ||
+          (item.response.triage?.area ? (areaCounts[item.response.triage.area.trim()] ?? 0) < 3 : false),
         recentOverload: item.response.triage?.recentOverload,
         sleepQuality: item.response.triage?.sleepQuality,
         workModel: item.response.triage?.workModel,
@@ -862,11 +1198,16 @@ function buildCompanyView(responses: ResponseRecord[]): CompanyView {
     conditionPrevalence,
     executiveSummary,
     priorityInsights,
+    diagnosticHypotheses,
+    benchmarkMetrics,
+    sampleAlerts,
+    criticalSegments,
   };
 }
 
 export function buildDashboardPayload(args: {
   responses: ResponseRecord[];
+  baselineResponses?: ResponseRecord[];
   companyLabel: string;
   seats?: number;
   teamOptions?: string[];
@@ -881,6 +1222,7 @@ export function buildDashboardPayload(args: {
 }): DashboardPayload {
   const {
     companyAccess = null,
+    baselineResponses,
     companyLabel,
     includeCompanyView = true,
     teamOptions = [],
@@ -933,7 +1275,7 @@ export function buildDashboardPayload(args: {
       socialIsolation: [],
     },
     individual,
-    companyView: includeCompanyView ? buildCompanyView(responses) : null,
+    companyView: includeCompanyView ? buildCompanyView(responses, baselineResponses ?? responses) : null,
     companyAccess: includeCompanyView ? companyAccess : null,
     allowedViews,
     defaultView,

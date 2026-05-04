@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useState, startTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Activity, HeartPulse, ShieldCheck, Users } from "lucide-react";
+import { Activity, HeartPulse, ShieldCheck } from "lucide-react";
+import { BrandLogo } from "@/components/branding/logo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -63,24 +64,6 @@ type TriageForm = {
   motivationLevel: "preservada" | "oscilando" | "reduzida" | "";
   socialIsolation: "nao" | "pontual" | "frequente" | "";
 };
-
-const triageTopics = [
-  {
-    icon: Activity,
-    title: "Burnout e fadiga",
-    text: "Mapeamos energia, carga horária, sobrecarga e sono para estimar esgotamento ocupacional.",
-  },
-  {
-    icon: HeartPulse,
-    title: "Ansiedade e pressão",
-    text: "Incluímos pressão emocional, exposição e segurança para identificar tensão sustentada.",
-  },
-  {
-    icon: Users,
-    title: "Humor e conexão",
-    text: "Motivação e sensação de isolamento ajudam a revelar retração, tristeza e desconexão social.",
-  },
-];
 
 const FORM_ACCESS_SESSION_KEY = "metodo-sert:validated-member-token";
 const INITIAL_ANSWERS: AnswersState = Object.fromEntries(questions.map((q) => [q.id, 3]));
@@ -435,33 +418,17 @@ function FormContent() {
       <main className="mx-auto max-w-7xl px-5 py-10 md:px-8 lg:px-10 lg:py-14">
         <section className="space-y-8 text-center">
           <div className="mx-auto flex max-w-4xl flex-col items-center space-y-5 pt-2">
+            <BrandLogo iconOnly />
             <span className="hero-pill">
               <ShieldCheck className="h-3.5 w-3.5" />
-              Método Sert
+              Jornada segura
             </span>
             <h1 className="max-w-4xl text-4xl font-semibold tracking-[-0.05em] md:text-6xl">
               Check-in Psicossocial
             </h1>
-            <p className="mx-auto max-w-3xl text-base leading-8 text-[var(--muted-foreground)] md:text-[1.35rem]">
-              Valide o token, preencha uma triagem breve e responda a escala. O dashboard libera uma
-              leitura automática com foco em risco psicossocial e priorização de cuidado.
+            <p className="mx-auto max-w-4xl text-base leading-8 text-[var(--muted-foreground)] md:text-[1.35rem]">
+              Valide o token, registre o consentimento, conclua a triagem e responda a escala.
             </p>
-          </div>
-
-          <div className="mx-auto grid w-full max-w-6xl gap-4 lg:grid-cols-3">
-            {triageTopics.map((topic) => (
-              <Card key={topic.title} className="metric-card text-center lg:text-left">
-                <CardContent className="space-y-4 p-0">
-                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[rgba(106,161,160,0.10)] text-[var(--primary)] lg:mx-0">
-                    <topic.icon className="h-6 w-6" />
-                  </div>
-                  <div className="space-y-2">
-                    <p className="text-2xl font-semibold tracking-[-0.04em]">{topic.title}</p>
-                    <p className="text-sm leading-7 text-[var(--muted-foreground)]">{topic.text}</p>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
           </div>
 
           <div className="mx-auto flex w-full max-w-6xl flex-col items-center space-y-8">
@@ -577,7 +544,7 @@ function FormContent() {
 
                 <div className="grid gap-4 md:grid-cols-2">
                   <Link
-                    href={token ? `/termos-de-uso?token=${encodeURIComponent(token)}` : "/termos-de-uso"}
+                    href={token ? `/termos-de-uso?token=${encodeURIComponent(token)}&source=form` : "/termos-de-uso?source=form"}
                     className="rounded-[1.4rem] border border-[var(--border)] bg-white px-5 py-5 text-left shadow-[0_12px_24px_rgba(129,155,179,0.08)] transition-colors hover:bg-[var(--accent)]"
                   >
                     <p className="text-base font-semibold text-[var(--foreground)]">Ler Termos de Uso</p>
@@ -588,8 +555,8 @@ function FormContent() {
                   <Link
                     href={
                       token
-                        ? `/politica-de-privacidade?token=${encodeURIComponent(token)}`
-                        : "/politica-de-privacidade"
+                        ? `/politica-de-privacidade?token=${encodeURIComponent(token)}&source=form`
+                        : "/politica-de-privacidade?source=form"
                     }
                     className="rounded-[1.4rem] border border-[var(--border)] bg-white px-5 py-5 text-left shadow-[0_12px_24px_rgba(129,155,179,0.08)] transition-colors hover:bg-[var(--accent)]"
                   >

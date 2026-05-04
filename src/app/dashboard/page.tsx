@@ -1,17 +1,33 @@
 "use client";
 
 import type { ComponentType } from "react";
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Ban, Calendar, Copy, Download, KeyRound, Layers3, Lock, RotateCcw, Settings2, ShieldAlert, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, Users, X } from "lucide-react";
+import { Ban, Calendar, Copy, Download, KeyRound, Layers3, Lock, RotateCcw, Settings2, ShieldAlert, SlidersHorizontal, Sparkles, Trash2, X } from "lucide-react";
+import { BrandLogo } from "@/components/branding/logo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+} from "@/components/ui/sidebar";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import type {
   AreaBucket,
+  ComparisonGroup,
+  ComparisonGroupKind,
   CompanyView,
   ConditionSignal,
   DashboardPayload,
@@ -22,6 +38,7 @@ import type {
   PathologyHeatmapRow,
   QuestionScore,
   ViewMode,
+  BenchmarkMetric,
 } from "@/lib/metrics";
 import {
   applyCompanyFiltersToParams,
@@ -93,6 +110,13 @@ const triageLabels = {
   socialIsolation: { nao: "Sem isolamento", pontual: "Isolamento pontual", frequente: "Isolamento frequente" },
 } as const;
 
+type SavedFilterPreset = {
+  id: string;
+  name: string;
+  filters: CompanyFilters;
+  savedAt: string;
+};
+
 export default function DashboardPage() {
   return (
     <Suspense fallback={<DashboardLoadingState />}>
@@ -107,7 +131,7 @@ function DashboardContent() {
   const router = useRouter();
   const [payload, setPayload] = useState<DashboardPayload | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [activeView, setActiveView] = useState<ViewMode>("company");
+  const [activeView, setActiveView] = useState<ViewMode>((searchParams.get("panelView") as ViewMode) || "company");
   const [blocked, setBlocked] = useState(false);
 
   const viewKey = searchParams.get("view") ?? "";
@@ -115,8 +139,18 @@ function DashboardContent() {
   const accessToken = searchParams.get("accessToken") ?? "";
   const companyId = searchParams.get("companyId") ?? "";
   const adminScope = searchParams.get("adminScope") ?? "";
-  const fromAdmin = searchParams.get("fromAdmin") === "1";
   const companyFilters = useMemo(() => parseCompanyFiltersFromParams(searchParams), [searchParams]);
+  const tabFromUrl = searchParams.get("tab") ?? "panorama";
+  const compareKindFromUrl = (searchParams.get("compareKind") as ComparisonGroupKind) || "team";
+  const compareAFromUrl = searchParams.get("compareA") ?? "";
+  const compareBFromUrl = searchParams.get("compareB") ?? "";
+
+  const updateUrlParams = useCallback((mutate: (params: URLSearchParams) => void) => {
+    const params = new URLSearchParams(searchParams.toString());
+    mutate(params);
+    const href = params.toString() ? `${pathname}?${params.toString()}` : pathname;
+    router.replace(href, { scroll: false });
+  }, [pathname, router, searchParams]);
 
   const buildDashboardParams = useCallback((filters: CompanyFilters) => {
     const params = new URLSearchParams();
@@ -130,10 +164,9 @@ function DashboardContent() {
   }, [accessToken, adminScope, companyId, memberToken, viewKey]);
 
   function syncFiltersToUrl(filters: CompanyFilters) {
-    const params = new URLSearchParams(searchParams.toString());
-    applyCompanyFiltersToParams(params, filters);
-    const href = params.toString() ? `${pathname}?${params.toString()}` : pathname;
-    router.replace(href, { scroll: false });
+    updateUrlParams((params) => {
+      applyCompanyFiltersToParams(params, filters);
+    });
   }
 
   async function loadDashboard() {
@@ -148,9 +181,9 @@ function DashboardContent() {
       return;
     }
 
-    const data = (await response.json()) as DashboardPayload;
-    setPayload(data);
-    setActiveView(data.defaultView);
+      const data = (await response.json()) as DashboardPayload;
+      setPayload(data);
+      setActiveView((searchParams.get("panelView") as ViewMode) || data.defaultView);
     setBlocked(false);
     setStatus(null);
   }
@@ -175,7 +208,7 @@ function DashboardContent() {
       if (cancelled) return;
 
       setPayload(data);
-      setActiveView(data.defaultView);
+      setActiveView((searchParams.get("panelView") as ViewMode) || data.defaultView);
       setBlocked(false);
       setStatus(null);
     }
@@ -185,7 +218,7 @@ function DashboardContent() {
     return () => {
       cancelled = true;
     };
-  }, [buildDashboardParams, companyFilters]);
+  }, [buildDashboardParams, companyFilters, searchParams]);
 
   const availableViews = useMemo(() => {
     if (!payload) return [] as Array<{ id: ViewMode; label: string; description: string }>;
@@ -219,21 +252,17 @@ function DashboardContent() {
   }
 
   return (
-    <div className="shell-page min-h-screen text-[var(--foreground)]">
+    <div className="shell-page brand-shell min-h-screen text-[var(--foreground)]">
       {payload && (
-        <div className="mx-auto w-full max-w-[1520px] space-y-8 px-4 py-6 lg:px-8 lg:py-8">
-          <DashboardTopBar
-            accessToken={accessToken}
-            availableViews={availableViews}
-            companyId={companyId}
-            fromAdmin={fromAdmin}
-            payload={payload}
-            resolvedActiveView={resolvedActiveView}
-            setActiveView={setActiveView}
-            status={status}
-          />
-
-          <div className="w-full rounded-[2rem] border border-[var(--border)] bg-[rgba(255,255,255,0.5)] p-4 shadow-[0_24px_60px_rgba(129,155,179,0.12)] lg:p-7">
+        <div className="w-full px-0 py-0">
+          <>
+            {status && (
+              <div className="px-4 pt-4 lg:px-6 lg:pt-6">
+                <Card className="frost-card rounded-[24px] border-[var(--border)] bg-[var(--accent)] text-[var(--foreground)] shadow-sm">
+                  <CardContent className="p-4 text-sm">{status}</CardContent>
+                </Card>
+              </div>
+            )}
             {resolvedActiveView === "individual" && payload.individual && (
               <IndividualSection individual={payload.individual} />
             )}
@@ -246,12 +275,26 @@ function DashboardContent() {
                 onRefresh={loadDashboard}
                 activeFilters={companyFilters}
                 filterOptions={payload.filterOptions}
+                activeTab={tabFromUrl}
+                comparisonKindFromUrl={compareKindFromUrl}
+                comparisonGroupAFromUrl={compareAFromUrl}
+                comparisonGroupBFromUrl={compareBFromUrl}
                 onChangeFilters={(nextFilters) => {
                   syncFiltersToUrl(nextFilters);
                 }}
+                onChangeTab={(tab) => updateUrlParams((params) => {
+                  params.set("tab", tab);
+                })}
+                onChangeComparisonState={(next) => updateUrlParams((params) => {
+                  params.set("compareKind", next.kind);
+                  if (next.groupAId) params.set("compareA", next.groupAId);
+                  else params.delete("compareA");
+                  if (next.groupBId) params.set("compareB", next.groupBId);
+                  else params.delete("compareB");
+                })}
               />
             )}
-          </div>
+          </>
         </div>
       )}
     </div>
@@ -260,8 +303,8 @@ function DashboardContent() {
 
 function DashboardLoadingState() {
   return (
-    <div className="shell-page min-h-screen px-6 py-10">
-      <Card className="mx-auto w-full max-w-3xl border-[var(--border)] bg-[rgba(255,255,255,0.82)] shadow-sm">
+    <div className="shell-page brand-shell min-h-screen px-6 py-10">
+      <Card className="frost-card mx-auto w-full max-w-3xl border-[var(--border)] bg-[rgba(255,255,255,0.82)] shadow-sm">
         <CardContent className="p-6 text-sm text-[var(--muted-foreground)]">
           Carregando dashboard...
         </CardContent>
@@ -270,125 +313,13 @@ function DashboardLoadingState() {
   );
 }
 
-function DashboardTopBar({
-  accessToken,
-  availableViews,
-  companyId,
-  fromAdmin,
-  payload,
-  resolvedActiveView,
-  setActiveView,
-  status,
-}: {
-  accessToken: string;
-  availableViews: Array<{ id: ViewMode; label: string; description: string }>;
-  companyId: string;
-  fromAdmin: boolean;
-  payload: DashboardPayload;
-  resolvedActiveView: ViewMode;
-  setActiveView: (view: ViewMode) => void;
-  status: string | null;
-}) {
-  const router = useRouter();
-
-  function exportCompanyReport() {
-    const params = new URLSearchParams();
-    if (companyId) params.set("companyId", companyId);
-    if (accessToken) params.set("accessToken", accessToken);
-    applyCompanyFiltersToParams(params, payload.activeFilters);
-    window.open(`/api/reports/company?${params.toString()}`, "_blank", "noopener,noreferrer");
-  }
-
-  return (
-    <>
-      <div className="w-full px-1 py-1 lg:px-2">
-        <div className="flex flex-col gap-8">
-          <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
-            <div>
-              <div className="flex flex-wrap items-center gap-3">
-                <span className="hero-pill">
-                  <Sparkles className="h-3.5 w-3.5" />
-                  Painel analitico NR-1
-                </span>
-                {fromAdmin && (
-                  <Button variant="outline" size="sm" onClick={() => router.push("/admin")}>
-                    <ArrowLeft className="h-4 w-4" />
-                    Voltar ao painel
-                  </Button>
-                )}
-              </div>
-              <h1 className="mt-5 text-4xl font-semibold tracking-[-0.06em] lg:text-6xl">
-                {resolvedActiveView === "individual"
-                  ? "Leitura Psicossocial Individual"
-                  : "Leitura Psicossocial Organizacional"}
-              </h1>
-              <p className="mt-3 max-w-4xl text-lg leading-8 text-[var(--muted-foreground)]">
-                {payload.companyLabel} {resolvedActiveView === "company" ? "• visão consolidada" : "• leitura protegida"}
-              </p>
-            </div>
-            <div className="flex flex-col gap-4 xl:items-end">
-              {resolvedActiveView === "company" && (
-                <div className="grid gap-4 sm:grid-cols-4">
-                  <MiniMetric icon={Users} label="Respostas" value={`${payload.totalResponses}`} />
-                  <MiniMetric
-                    icon={ShieldCheck}
-                    label="Adesão"
-                    value={typeof payload.participationRate === "number" ? `${payload.participationRate}%` : "--"}
-                  />
-                  <MiniMetric
-                    icon={Calendar}
-                    label="Atualização"
-                    value={new Date(payload.generatedAt).toLocaleDateString("pt-BR")}
-                  />
-                  <Button variant="outline" size="sm" onClick={exportCompanyReport}>
-                    <Download className="h-4 w-4" />
-                    Relatório CSV
-                  </Button>
-                </div>
-              )}
-
-              {!!availableViews.length && resolvedActiveView === "company" && (
-                <div className="rounded-[1.7rem] border border-[var(--border)] bg-[rgba(255,255,255,0.9)] p-1.5 shadow-[0_12px_30px_rgba(129,155,179,0.10)]">
-                  <div className="flex flex-wrap gap-1.5">
-                    {availableViews.map((view) => (
-                      <button
-                        key={view.id}
-                        type="button"
-                        onClick={() => setActiveView(view.id)}
-                        className={cn(
-                          "inline-flex min-w-[180px] items-center justify-center gap-2 rounded-[1.3rem] px-5 py-4 text-sm font-semibold transition-all",
-                          resolvedActiveView === view.id
-                            ? "bg-[#24314d] text-white shadow-[0_10px_24px_rgba(36,49,77,0.20)]"
-                            : "text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
-                        )}
-                      >
-                        {view.id === "individual" ? <Lock className="h-4 w-4" /> : <Layers3 className="h-4 w-4" />}
-                        {view.id === "individual" ? "Sua Leitura" : "Visão Empresa"}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {status && (
-        <Card className="w-full rounded-[24px] border-[var(--border)] bg-[var(--accent)] text-[var(--foreground)] shadow-sm">
-          <CardContent className="p-4 text-sm">{status}</CardContent>
-        </Card>
-      )}
-    </>
-  );
-}
-
 function IndividualSection({ individual }: { individual: IndividualView }) {
   const triagePills = buildTriagePills(individual);
 
   return (
     <div className="space-y-8 lg:space-y-10">
-      <div className="flex flex-col gap-4 rounded-[2rem] border border-[var(--border)] bg-[rgba(238,246,246,0.75)] px-5 py-5 shadow-[0_18px_40px_rgba(129,155,179,0.10)] lg:flex-row lg:items-start lg:justify-between lg:px-6">
+      <Card className="bg-[var(--accent)]">
+        <CardContent className="flex flex-col gap-4 p-6 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-[var(--muted-foreground)]">Leitura protegida</p>
           <h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-[var(--foreground)]">Leitura individual protegida</h2>
@@ -403,7 +334,8 @@ function IndividualSection({ individual }: { individual: IndividualView }) {
             Esta visão individual só pode ser reaberta com o mesmo token usado na avaliação ou por uma sessão administrativa autorizada da empresa.
           </div>
         </div>
-      </div>
+        </CardContent>
+      </Card>
 
       <section className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
         <KpiCard label="Índice individual" value={individual.overallAverage.toFixed(2)} helper="Escala 1-5" variant="individual" />
@@ -431,7 +363,7 @@ function IndividualSection({ individual }: { individual: IndividualView }) {
       </section>
 
       <section className="grid gap-10 xl:grid-cols-[1.05fr_0.95fr] xl:items-start">
-        <Card className="rounded-[2rem] border-[var(--border)] bg-[rgba(255,255,255,0.88)] shadow-[0_18px_45px_rgba(129,155,179,0.10)]">
+        <Card>
           <CardHeader className="space-y-3 pb-2">
             <CardTitle className="text-xl">Mapa individual por dimensão</CardTitle>
             <CardDescription>Leitura das dimensões psicossociais reportadas nesta resposta.</CardDescription>
@@ -450,7 +382,7 @@ function IndividualSection({ individual }: { individual: IndividualView }) {
           </CardContent>
         </Card>
 
-        <Card className="rounded-[2rem] border-[var(--border)] bg-[rgba(255,255,255,0.88)] shadow-[0_18px_45px_rgba(129,155,179,0.10)]">
+        <Card>
           <CardHeader className="space-y-3 pb-2">
             <CardTitle className="text-xl">Sinais prioritários</CardTitle>
             <CardDescription>Hipóteses de leitura clínica organizadas por intensidade estimada.</CardDescription>
@@ -479,7 +411,13 @@ function CompanySection({
   onRefresh,
   activeFilters,
   filterOptions,
+  activeTab: activeTabFromUrl,
+  comparisonKindFromUrl,
+  comparisonGroupAFromUrl,
+  comparisonGroupBFromUrl,
   onChangeFilters,
+  onChangeTab,
+  onChangeComparisonState,
 }: {
   companyView: CompanyView;
   companyAccess: DashboardPayload["companyAccess"];
@@ -488,75 +426,266 @@ function CompanySection({
   onRefresh: () => Promise<void>;
   activeFilters: CompanyFilters;
   filterOptions: DashboardPayload["filterOptions"];
+  activeTab: string;
+  comparisonKindFromUrl: ComparisonGroupKind;
+  comparisonGroupAFromUrl: string;
+  comparisonGroupBFromUrl: string;
   onChangeFilters: (filters: CompanyFilters) => void;
+  onChangeTab: (tab: string) => void;
+  onChangeComparisonState: (state: { kind: ComparisonGroupKind; groupAId: string; groupBId: string }) => void;
 }) {
-  const [tokenModalOpen, setTokenModalOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState("panorama");
-  const [filtersPanelOpen, setFiltersPanelOpen] = useState(false);
+  const [savedPresets, setSavedPresets] = useState<SavedFilterPreset[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = window.localStorage.getItem(`dashboard-saved-filters:${companyLabel}`);
+      return raw ? (JSON.parse(raw) as SavedFilterPreset[]) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [filtersExpanded, setFiltersExpanded] = useState(() => hasActiveCompanyFilters(activeFilters));
+  const [tokenAdminOpen, setTokenAdminOpen] = useState(false);
+  const [technicalQuery, setTechnicalQuery] = useState("");
+  const deferredTechnicalQuery = useDeferredValue(technicalQuery);
   const activeFilterChips = buildActiveFilterChips(activeFilters);
+  const tabItems = [
+    { id: "panorama", label: "Panorama executivo", icon: Sparkles },
+    { id: "visao-geral", label: "Visão geral", icon: Layers3 },
+    { id: "diagnostico", label: "Diagnóstico", icon: ShieldAlert },
+    { id: "recortes", label: "Recortes", icon: SlidersHorizontal },
+    { id: "tecnico", label: "Camada técnica", icon: Settings2 },
+  ] as const;
+  const availableComparisonKinds = getAvailableComparisonKinds(companyView.comparisonGroups);
+  const resolvedComparisonKind = availableComparisonKinds.includes(comparisonKindFromUrl)
+    ? comparisonKindFromUrl
+    : availableComparisonKinds[0] ?? "team";
+  const comparisonGroupsForKind = companyView.comparisonGroups.filter((group) => group.kind === resolvedComparisonKind);
+  const defaultComparisonSelection = getDefaultComparisonSelection(comparisonGroupsForKind);
+  const resolvedComparisonGroupA = comparisonGroupsForKind.some((group) => group.id === comparisonGroupAFromUrl)
+    ? comparisonGroupAFromUrl
+    : defaultComparisonSelection?.groupAId ?? "";
+  const resolvedComparisonGroupB = comparisonGroupsForKind.some(
+    (group) => group.id === comparisonGroupBFromUrl && group.id !== resolvedComparisonGroupA
+  )
+    ? comparisonGroupBFromUrl
+    : defaultComparisonSelection?.groupAId === resolvedComparisonGroupA
+      ? defaultComparisonSelection.groupBId
+      : comparisonGroupsForKind.find((group) => group.id !== resolvedComparisonGroupA)?.id ?? "";
+  const filteredTechnicalRows = useMemo(() => {
+    const query = deferredTechnicalQuery.trim().toLowerCase();
+    if (!query) return companyView.technicalResponseRows;
+    return companyView.technicalResponseRows.filter((row) =>
+      [
+        row.pseudonymId ?? row.id,
+        row.team ?? "",
+        row.role ?? "",
+        row.area ?? "",
+        row.weakestDimension,
+        row.riskBand,
+      ].some((value) => value.toLowerCase().includes(query))
+    );
+  }, [companyView.technicalResponseRows, deferredTechnicalQuery]);
+  const activeTabMeta = tabItems.find((item) => item.id === activeTabFromUrl) ?? tabItems[0];
+  const headlineMetrics = [
+    {
+      label: "Score geral",
+      value: `${companyView.wellbeingIndex.toFixed(0)}%`,
+      helper: "Bem-estar",
+    },
+    {
+      label: "Participação",
+      value: companyAccess ? `${Math.round((companyAccess.usedTokens / Math.max(companyAccess.totalTokens, 1)) * 100)}%` : `${companyView.totalResponses}`,
+      helper: companyAccess ? `${companyAccess.usedTokens}/${companyAccess.totalTokens} convites` : "Base",
+    },
+    {
+      label: "Casos críticos",
+      value: `${companyView.highRiskShare.toFixed(0)}%`,
+      helper: "Alta atenção",
+    },
+    {
+      label: "Setores com leitura",
+      value: `${new Set(companyView.segmentSnapshots.map((segment) => segment.segment)).size || companyView.comparisonGroups.length}`,
+      helper: "Recortes",
+    },
+  ];
+  const panoramaMetrics = [
+    { label: "Mediana", value: companyView.overallMedian.toFixed(2), helper: "Escala 1-5" },
+    { label: "Média", value: companyView.overallAverage.toFixed(2), helper: "Escala 1-5" },
+    { label: "Maior atenção", value: companyView.weakestDimension, helper: "Dimensão" },
+    { label: "Maior proteção", value: companyView.strongestDimension, helper: "Dimensão" },
+    { label: "Sobrecarga", value: `${companyView.overloadShare.toFixed(0)}%`, helper: "Triagem" },
+    { label: "Sono em risco", value: `${companyView.sleepRiskShare.toFixed(0)}%`, helper: "Triagem" },
+  ];
+  const shouldShowFilters = filtersExpanded || activeFilterChips.length > 0;
+
+  function persistPresets(nextPresets: SavedFilterPreset[]) {
+    setSavedPresets(nextPresets);
+    window.localStorage.setItem(`dashboard-saved-filters:${companyLabel}`, JSON.stringify(nextPresets));
+  }
+
+  function saveCurrentPreset() {
+    const name = window.prompt("Nome do recorte salvo:");
+    if (!name?.trim()) return;
+    const nextPreset: SavedFilterPreset = {
+      id: crypto.randomUUID(),
+      name: name.trim(),
+      filters: activeFilters,
+      savedAt: new Date().toISOString(),
+    };
+    persistPresets([nextPreset, ...savedPresets].slice(0, 8));
+  }
+
+  function deletePreset(presetId: string) {
+    persistPresets(savedPresets.filter((preset) => preset.id !== presetId));
+  }
 
   return (
-    <div className="space-y-6">
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-center">
-        <TabsList className="grid w-full grid-cols-2 gap-2 lg:grid-cols-5">
-          <TabsTrigger value="panorama">Panorama executivo</TabsTrigger>
-          <TabsTrigger value="visao-geral">Visão geral</TabsTrigger>
-          <TabsTrigger value="diagnostico">Diagnóstico</TabsTrigger>
-          <TabsTrigger value="recortes">Recortes</TabsTrigger>
-          <TabsTrigger value="tecnico">Camada técnica</TabsTrigger>
-        </TabsList>
-        <Button
-          type="button"
-          variant="outline"
-          className="h-12 rounded-[1.25rem] px-4 xl:min-w-[170px]"
-          onClick={() => setFiltersPanelOpen(true)}
-        >
-          <SlidersHorizontal className="h-4 w-4" />
-          Filtros
-          {activeFilterChips.length ? (
-            <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-[var(--foreground)] px-2 text-xs text-white">
-              {activeFilterChips.length}
-            </span>
-          ) : null}
-        </Button>
-      </div>
+    <Tabs value={activeTabFromUrl} onValueChange={onChangeTab} className="space-y-0">
+      <SidebarProvider defaultOpen>
+        <div className="overflow-hidden rounded-[2rem] border border-[rgba(255,255,255,0.58)] bg-[rgba(255,255,255,0.56)] shadow-[0_28px_90px_rgba(19,34,56,0.08)] backdrop-blur-xl">
+          <div className="grid min-h-[calc(100vh-11rem)] xl:grid-cols-[288px_minmax(0,1fr)]">
+            <Sidebar className="brand-grid hidden border-r border-[rgba(255,255,255,0.54)] bg-[linear-gradient(180deg,rgba(255,255,255,0.88)_0%,rgba(241,246,248,0.82)_100%)] xl:flex xl:w-[288px]">
+              <SidebarHeader className="space-y-5 border-b border-[rgba(19,34,56,0.08)] px-6 py-6">
+                <BrandLogo compact />
+                <Card className="frost-card rounded-[1.4rem] border-[rgba(255,255,255,0.5)] bg-white/82 shadow-none">
+                  <CardContent className="space-y-3 p-4">
+                    <div>
+                      <p className="text-lg font-semibold text-[var(--foreground)]">{companyLabel}</p>
+                      <p className="text-sm text-[var(--muted-foreground)]">
+                        {companyView.totalResponses} colaboradores no recorte atual
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <SidebarMetric label="Base" value={`${companyView.totalResponses}`} />
+                      <SidebarMetric label="Filtros" value={`${activeFilterChips.length}`} />
+                    </div>
+                  </CardContent>
+                </Card>
+              </SidebarHeader>
 
-      <div className="flex flex-col gap-3 rounded-[1.6rem] border border-[var(--border)] bg-[rgba(255,255,255,0.68)] px-4 py-4 shadow-[0_12px_28px_rgba(44,62,80,0.05)]">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="space-y-1">
-            <p className="text-sm font-semibold text-[var(--foreground)]">Recorte ativo</p>
-            <p className="text-sm text-[var(--muted-foreground)]">
-              {activeFilterChips.length
-                ? "Os indicadores abaixo estao recalculados com base nos filtros selecionados."
-                : "Nenhum filtro aplicado. A leitura mostra a base consolidada da empresa."}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <Badge variant="outline">{companyView.totalResponses} pessoas no recorte</Badge>
-            {activeFilterChips.length ? (
-              <Button variant="outline" size="sm" onClick={() => onChangeFilters(getDefaultCompanyFilters())}>
-                <RotateCcw className="h-4 w-4" />
-                Limpar filtros
-              </Button>
-            ) : null}
-          </div>
-        </div>
+              <SidebarContent className="space-y-6 px-4 py-5">
+                <SidebarMenu className="space-y-2">
+                  {tabItems.map((item) => {
+                    const Icon = item.icon;
 
-        {activeFilterChips.length ? (
-          <div className="flex flex-wrap gap-2">
-            {activeFilterChips.map((chip) => (
-              <Badge key={chip} variant="outline">{chip}</Badge>
-            ))}
-          </div>
-        ) : null}
-      </div>
+                    return (
+                      <SidebarMenuItem key={item.id}>
+                        <SidebarMenuButton isActive={activeTabFromUrl === item.id} onClick={() => onChangeTab(item.id)}>
+                          <Icon className="h-4 w-4 shrink-0" />
+                          <span>{item.label}</span>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
+                </SidebarMenu>
 
-      <TabsContent value="panorama" className="space-y-8">
+                <Card className="frost-card rounded-[1.5rem] border-[rgba(255,255,255,0.5)] bg-white/82 shadow-none">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Recorte ativo</CardTitle>
+                    <CardDescription>{activeFilterChips.length ? "Base filtrada" : "Base consolidada"}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="flex flex-wrap gap-2">
+                      {activeFilterChips.length ? activeFilterChips.map((chip) => (
+                        <Badge key={chip} variant="secondary" className="rounded-full">
+                          {chip}
+                        </Badge>
+                      )) : (
+                        <Badge variant="outline" className="rounded-full">Sem filtros</Badge>
+                      )}
+                    </div>
+                    <Button variant="outline" className="w-full justify-between" onClick={() => setFiltersExpanded((value) => !value)}>
+                      <span>Refinar visão</span>
+                      <SlidersHorizontal className="h-4 w-4" />
+                    </Button>
+                  </CardContent>
+                </Card>
+              </SidebarContent>
+
+              <SidebarFooter className="space-y-3 border-t border-[rgba(19,34,56,0.08)] px-4 py-4">
+                {activeFilterChips.length > 0 ? (
+                  <Button variant="ghost" className="w-full justify-start" onClick={() => onChangeFilters(getDefaultCompanyFilters())}>
+                    <RotateCcw className="h-4 w-4" />
+                    Limpar filtros
+                  </Button>
+                ) : null}
+              </SidebarFooter>
+            </Sidebar>
+
+            <SidebarInset className="brand-grid min-w-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.78),rgba(244,248,249,0.9))]">
+              <div className="space-y-6 p-4 md:p-6 xl:p-8">
+                <Card className="frost-card overflow-hidden rounded-[1.75rem] border-[rgba(255,255,255,0.56)] bg-white/84 shadow-none">
+                  <CardContent className="space-y-6 p-6">
+                    <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+                      <div>
+                        <h2 className="text-3xl font-semibold tracking-[-0.05em] text-[var(--foreground)] md:text-4xl">
+                          {activeTabMeta.label}
+                        </h2>
+                      </div>
+
+                      {activeTabFromUrl === "panorama" ? (
+                        <div className="flex flex-col gap-3 md:items-end">
+                          <div className="flex flex-wrap gap-2">
+                            <Button variant="outline" onClick={() => setFiltersExpanded((value) => !value)}>
+                              <SlidersHorizontal className="h-4 w-4" />
+                              Filtros
+                            </Button>
+                            {companyAccess ? (
+                              <Button variant="outline" onClick={() => exportTokensCsv(companyAccess, companyLabel)}>
+                                <Download className="h-4 w-4" />
+                                Exportar tokens
+                              </Button>
+                            ) : null}
+                            <Button variant="outline" onClick={() => window.print()}>
+                              <Download className="h-4 w-4" />
+                              Exportar painel
+                            </Button>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <MiniMetric icon={Calendar} label="Atualização" value={new Date().toLocaleDateString("pt-BR", { month: "long", year: "numeric" })} />
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {activeTabFromUrl === "panorama" ? (
+                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                        {headlineMetrics.map((metric) => (
+                          <HeroMetricCard
+                            key={metric.label}
+                            label={metric.label}
+                            value={metric.value}
+                            helper={metric.helper}
+                          />
+                        ))}
+                      </div>
+                    ) : null}
+                  </CardContent>
+                </Card>
+
+                <div className="xl:hidden">
+                  <TabsList className="grid h-auto w-full grid-cols-2 gap-2 rounded-[1.5rem] bg-white/80 p-2 md:grid-cols-5">
+                    {tabItems.map((item) => (
+                      <TabsTrigger key={item.id} value={item.id} className="rounded-[1rem] py-2.5">
+                        {item.label}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                </div>
+
+                {shouldShowFilters ? (
+                  <CompanyFilterPanel
+                    activeFilters={activeFilters}
+                    activeFilterChips={activeFilterChips}
+                    filterOptions={filterOptions}
+                    onChangeFilters={onChangeFilters}
+                    sampleSize={companyView.totalResponses}
+                  />
+                ) : null}
+
+                <TabsContent value="panorama" className="space-y-8">
         <SectionHeader
-          eyebrow="Panorama executivo"
-          title="Resumo rápido da saúde psicossocial"
-          description="Primeira leitura da base com KPIs centrais e o mapa visual mais importante para diretoria e RH."
+          title="Panorama executivo"
         />
 
         {companyAccess && (
@@ -569,112 +698,131 @@ function CompanySection({
               <KpiCard label="Alertas" value={`${companyAccess.alertCount}`} helper="Alta atenção + crítico" />
             </div>
 
-            <Card className="rounded-[26px] border-[var(--border)] bg-[rgba(255,255,255,0.88)] shadow-[0_18px_45px_rgba(44,62,80,0.06)]">
+            <Card className="rounded-[1.75rem] border-[rgba(19,34,56,0.08)] bg-white/92 shadow-none">
               <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <div className="flex items-center gap-3">
-                    <CardTitle className="text-xl">Bloco de tokens</CardTitle>
-                    <div className="group relative">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        className="h-9 w-9 rounded-full"
-                        onClick={() => setTokenModalOpen(true)}
-                        aria-label="Configurações do token"
-                      >
-                        <Settings2 className="h-4 w-4" />
-                      </Button>
-                      <div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 hidden -translate-x-1/2 whitespace-nowrap rounded-xl border border-[var(--border)] bg-white px-3 py-2 text-xs text-[var(--muted-foreground)] shadow-[0_14px_30px_rgba(44,62,80,0.12)] group-hover:block group-focus-within:block">
-                        Configurações do token
-                      </div>
-                    </div>
-                  </div>
+                  <CardTitle className="text-xl">Acesso e distribuição de tokens</CardTitle>
                   <CardDescription>
-                    Tokens institucionais e individuais disponíveis para cópia rápida.
+                    Tokens institucionais e individuais com cópia rápida e trilha de operação no mesmo card.
                   </CardDescription>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => exportTokensCsv(companyAccess, companyLabel)}
-                >
-                  <Download className="h-4 w-4" />
-                  Exportar
+                <Button variant="outline" size="sm" onClick={() => setTokenAdminOpen(true)}>
+                  <Settings2 className="h-4 w-4" />
+                  Gerenciar tokens
                 </Button>
               </CardHeader>
               <CardContent className="space-y-5">
-                <div className="space-y-3">
+                <div className="space-y-5">
+                  <div className="space-y-3">
                   <div className="flex items-center gap-2 text-sm font-semibold text-[var(--foreground)]">
                     <ShieldAlert className="h-4 w-4 text-[var(--primary)]" />
                     Visão empresa
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap gap-2">
                     {companyAccess.companyTokens.map((token) => (
                       <TokenChip key={token.value} value={token.value} used={token.used} active={token.active} />
                     ))}
                   </div>
                 </div>
 
-                <div className="space-y-3">
+                  <div className="space-y-3">
                   <div className="flex items-center gap-2 text-sm font-semibold text-[var(--foreground)]">
                     <KeyRound className="h-4 w-4 text-[var(--primary)]" />
                     Tokens individuais
                   </div>
-                  <div className="flex max-h-56 flex-wrap gap-2 overflow-y-auto pr-1">
+                    <div className="flex max-h-56 flex-wrap gap-2 overflow-y-auto pr-1">
                     {companyAccess.memberTokens.map((token) => (
                       <TokenChip key={token.value} value={token.value} used={token.used} active={token.active} />
                     ))}
                   </div>
                 </div>
+                </div>
               </CardContent>
             </Card>
-            <TokenSettingsModal
+
+            <TokenOperationsModal
               accessToken={accessToken}
               companyAccess={companyAccess}
               companyLabel={companyLabel}
-              onClose={() => setTokenModalOpen(false)}
+              onClose={() => setTokenAdminOpen(false)}
               onRefresh={onRefresh}
-              open={tokenModalOpen}
+              open={tokenAdminOpen}
             />
           </section>
         )}
 
         <section className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-          <Card className="rounded-[26px] border-[var(--border)] bg-[rgba(255,255,255,0.9)] shadow-[0_18px_45px_rgba(44,62,80,0.06)]">
+          <Card className="rounded-[1.75rem] border-[rgba(19,34,56,0.08)] bg-white/92 shadow-none">
             <CardHeader>
-              <CardTitle className="text-xl">Resumo executivo do recorte</CardTitle>
-              <CardDescription>Leitura automatica para RH, lideranca e consultoria com foco no grupo filtrado.</CardDescription>
+              <CardTitle className="text-xl">Leitura do recorte</CardTitle>
             </CardHeader>
-            <CardContent className="grid gap-4 md:grid-cols-3">
-              {companyView.executiveSummary.map((insight) => (
-                <InsightCard key={insight.title} title={insight.title} detail={insight.detail} tone={insight.tone} />
+            <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {panoramaMetrics.map((metric) => (
+                <KpiCard
+                  key={metric.label}
+                  label={metric.label}
+                  value={metric.value}
+                  helper={metric.helper}
+                  valueClassName={metric.label.includes("Maior") ? "text-[1.6rem] leading-tight md:text-[1.9rem]" : undefined}
+                />
               ))}
             </CardContent>
           </Card>
 
-          <Card className="rounded-[26px] border-[var(--border)] bg-[rgba(255,255,255,0.9)] shadow-[0_18px_45px_rgba(44,62,80,0.06)]">
+          <Card className="rounded-[1.75rem] border-[rgba(19,34,56,0.08)] bg-white/92 shadow-none">
             <CardHeader>
-              <CardTitle className="text-xl">Priorizacao de acao</CardTitle>
-              <CardDescription>As tres frentes mais valiosas para agir primeiro neste recorte.</CardDescription>
+              <CardTitle className="text-xl">Comparativo com a base total</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-4 md:grid-cols-2">
+              {companyView.benchmarkMetrics.slice(0, 4).map((metric) => (
+                <BenchmarkCard key={metric.label} metric={metric} />
+              ))}
+            </CardContent>
+          </Card>
+        </section>
+
+        <section className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
+          <Card className="rounded-[1.75rem] border-[rgba(19,34,56,0.08)] bg-white/92 shadow-none">
+            <CardHeader>
+              <CardTitle className="text-xl">Top 3 recortes críticos</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-3">
+              {companyView.criticalSegments.length ? companyView.criticalSegments.map((segment, index) => (
+                <div key={segment.id} className="rounded-[1.3rem] border border-[var(--border)] bg-[var(--accent)] px-4 py-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-semibold text-[var(--foreground)]">{index + 1}. {segment.label}</p>
+                      <p className="mt-1 text-xs uppercase tracking-[0.14em] text-[var(--muted-foreground)]">{segment.weakestDimension}</p>
+                    </div>
+                    <Badge variant="outline" className="rounded-full">{segment.riskBand}</Badge>
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-3">
+                    <SidebarMetric label="Base" value={`${segment.count}`} />
+                    <SidebarMetric label="Mediana" value={segment.overallMedian.toFixed(2)} />
+                  </div>
+                </div>
+              )) : (
+                <p className="text-sm text-[var(--muted-foreground)]">Sem base comparável suficiente.</p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-[1.75rem] border-[rgba(19,34,56,0.08)] bg-white/92 shadow-none">
+            <CardHeader>
+              <CardTitle className="text-xl">Alertas de amostra</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {companyView.priorityInsights.map((insight) => (
-                <div key={insight.title} className="rounded-[1.35rem] border border-[var(--border)] bg-[var(--accent)] px-4 py-4">
-                  <p className="text-sm font-semibold text-[var(--foreground)]">{insight.title}</p>
-                  <p className="mt-2 text-sm leading-6 text-[var(--muted-foreground)]">{insight.detail}</p>
-                </div>
+              {companyView.sampleAlerts.map((alert) => (
+                <InsightCard key={alert.title} title={alert.title} detail={alert.detail} tone={alert.tone} />
               ))}
             </CardContent>
           </Card>
         </section>
       </TabsContent>
 
-      <TabsContent value="visao-geral" className="space-y-8">
+                <TabsContent value="visao-geral" className="space-y-8">
         <SectionHeader
-          eyebrow="Visão geral"
-          title="Indicadores centrais da base"
-          description="KPIs executivos e gráficos principais para leitura rápida do risco e da incidência por categoria."
+          title="Indicadores centrais"
         />
 
         <section className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
@@ -684,25 +832,30 @@ function CompanySection({
           <KpiCard label="% ansiedade" value={`${companyView.anxietyRiskShare.toFixed(0)}%`} helper="Base com intensidade alta para ansiedade ocupacional" />
         </section>
 
+        <Card className="rounded-[1.75rem] border-[rgba(19,34,56,0.08)] bg-white/92 shadow-none">
+          <CardHeader>
+            <CardTitle className="text-xl">Comparação rápida com a base total</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+            {companyView.benchmarkMetrics.map((metric) => (
+              <BenchmarkCard key={metric.label} metric={metric} />
+            ))}
+          </CardContent>
+        </Card>
+
         <section className="grid gap-10 xl:grid-cols-[1.15fr_0.85fr]">
-          <Card className="rounded-[26px] border-[var(--border)] bg-[rgba(255,255,255,0.88)] shadow-[0_18px_45px_rgba(44,62,80,0.06)]">
+          <Card className="rounded-[1.75rem] border-[rgba(19,34,56,0.08)] bg-white/92 shadow-none">
             <CardHeader>
               <CardTitle className="text-xl">Indicadores por categoria</CardTitle>
-              <CardDescription>
-                Incidência média de ansiedade, burnout, depressão, estresse e satisfação percebida.
-              </CardDescription>
             </CardHeader>
             <CardContent className="pt-2 pb-3">
               <IndicatorBarChart items={companyView.indicatorBars} />
             </CardContent>
           </Card>
 
-          <Card className="rounded-[26px] border-[var(--border)] bg-[rgba(255,255,255,0.88)] shadow-[0_18px_45px_rgba(44,62,80,0.06)]">
+          <Card className="rounded-[1.75rem] border-[rgba(19,34,56,0.08)] bg-white/92 shadow-none">
             <CardHeader>
               <CardTitle className="text-xl">Distribuição de risco</CardTitle>
-              <CardDescription>
-                Classificação por nível de bem-estar em baixo risco, risco moderado e alto risco.
-              </CardDescription>
             </CardHeader>
             <CardContent className="pt-2 pb-3">
               <RiskDonutChart slices={companyView.riskDonut} />
@@ -711,32 +864,24 @@ function CompanySection({
         </section>
       </TabsContent>
 
-      <TabsContent value="diagnostico" className="space-y-8">
+                <TabsContent value="diagnostico" className="space-y-8">
         <SectionHeader
-          eyebrow="Diagnóstico"
-          title="Leitura analítica da organização"
-          description="Bloco para entender estrutura emocional, tendências prevalentes e os fatores que mais puxam risco na escala."
+          title="Diagnóstico"
         />
 
         <section className="grid gap-10 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-          <Card className="min-w-0 rounded-[26px] border-[var(--border)] bg-[rgba(255,255,255,0.88)] shadow-[0_18px_45px_rgba(44,62,80,0.06)]">
+          <Card className="rounded-[1.75rem] border-[rgba(19,34,56,0.08)] bg-white/92 shadow-none">
             <CardHeader>
               <CardTitle className="text-xl">Perfil psicológico organizacional</CardTitle>
-              <CardDescription>
-                Gráfico radar do mapeamento multidimensional da saúde organizacional.
-              </CardDescription>
             </CardHeader>
             <CardContent className="pt-2 pb-3">
               <RadarProfileChart dimensions={companyView.dimensionScores} />
             </CardContent>
           </Card>
 
-          <Card className="min-w-0 rounded-[26px] border-[var(--border)] bg-[rgba(255,255,255,0.88)] shadow-[0_18px_45px_rgba(44,62,80,0.06)]">
+          <Card className="rounded-[1.75rem] border-[rgba(19,34,56,0.08)] bg-white/92 shadow-none">
             <CardHeader>
               <CardTitle className="text-xl">Distribuição de bem-estar</CardTitle>
-              <CardDescription>
-                Quantidade de colaboradores por faixa do índice de bem-estar.
-              </CardDescription>
             </CardHeader>
             <CardContent className="pt-2 pb-3">
               <WellbeingAreaChart buckets={companyView.wellbeingArea} />
@@ -745,12 +890,9 @@ function CompanySection({
         </section>
 
         <section className="grid gap-10 xl:grid-cols-[0.9fr_1.1fr]">
-          <Card className="rounded-[26px] border-[var(--border)] bg-[rgba(255,255,255,0.88)] shadow-[0_18px_45px_rgba(44,62,80,0.06)]">
+          <Card className="rounded-[1.75rem] border-[rgba(19,34,56,0.08)] bg-white/92 shadow-none">
             <CardHeader>
               <CardTitle className="text-xl">Leitura guiada</CardTitle>
-              <CardDescription>
-                Principais interpretações executivas e sinais mais prováveis nesta base.
-              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
               <div className="grid gap-4 md:grid-cols-2">
@@ -758,16 +900,18 @@ function CompanySection({
                   <InsightCard key={insight.title} title={insight.title} detail={insight.detail} tone={insight.tone} />
                 ))}
               </div>
+              <div className="grid gap-4 md:grid-cols-3">
+                {companyView.diagnosticHypotheses.map((insight) => (
+                  <InsightCard key={insight.title} title={insight.title} detail={insight.detail} tone={insight.tone} />
+                ))}
+              </div>
               <ConditionGrid signals={companyView.tendencies.filter((signal) => !signal.name.includes("Satisfação"))} />
             </CardContent>
           </Card>
 
-          <Card className="rounded-[26px] border-[var(--border)] bg-[rgba(255,255,255,0.88)] shadow-[0_18px_45px_rgba(44,62,80,0.06)]">
+          <Card className="rounded-[1.75rem] border-[rgba(19,34,56,0.08)] bg-white/92 shadow-none">
             <CardHeader>
               <CardTitle className="text-xl">Fatores críticos da escala</CardTitle>
-              <CardDescription>
-                Itens mais frágeis da escala, úteis para fechar plano de ação com liderança e RH.
-              </CardDescription>
             </CardHeader>
             <CardContent>
               <QuestionTable rows={companyView.questionScores} />
@@ -776,19 +920,72 @@ function CompanySection({
         </section>
       </TabsContent>
 
-      <TabsContent value="recortes" className="space-y-8">
+                <TabsContent value="recortes" className="space-y-8">
         <SectionHeader
-          eyebrow="Recortes"
-          title="Onde o risco está concentrado"
-          description="Recortes por grupo, dimensão e função para localizar pontos quentes e priorizar a ação organizacional."
+          title="Recortes"
         />
 
-        <Card>
+        <GroupComparisonCard
+          groups={companyView.comparisonGroups}
+          comparisonKind={resolvedComparisonKind}
+          availableKinds={availableComparisonKinds}
+          groupAId={resolvedComparisonGroupA}
+          groupBId={resolvedComparisonGroupB}
+          onChangeComparisonKind={(value) => {
+            const nextGroups = companyView.comparisonGroups.filter((group) => group.kind === value);
+            onChangeComparisonState({
+              kind: value,
+              groupAId: nextGroups[0]?.id ?? "",
+              groupBId: nextGroups[1]?.id ?? "",
+            });
+          }}
+          onChangeGroupA={(value) =>
+            onChangeComparisonState({
+              kind: resolvedComparisonKind,
+              groupAId: value,
+              groupBId: resolvedComparisonGroupB,
+            })
+          }
+          onChangeGroupB={(value) =>
+            onChangeComparisonState({
+              kind: resolvedComparisonKind,
+              groupAId: resolvedComparisonGroupA,
+              groupBId: value,
+            })
+          }
+        />
+
+          <Card className="rounded-[1.75rem] border-[rgba(19,34,56,0.08)] bg-white/92 shadow-none">
+            <CardHeader>
+              <div>
+                <CardTitle className="text-xl">Recortes salvos</CardTitle>
+              </div>
+            </CardHeader>
+          <CardContent className="space-y-3">
+            {savedPresets.length ? savedPresets.map((preset) => (
+              <div key={preset.id} className="flex flex-col gap-3 rounded-[1.2rem] border border-[var(--border)] bg-[var(--accent)] px-4 py-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-[var(--foreground)]">{preset.name}</p>
+                  <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+                    Salvo em {new Date(preset.savedAt).toLocaleDateString("pt-BR")} · {buildActiveFilterChips(preset.filters).join(" · ") || "Sem filtros"}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => onChangeFilters(preset.filters)}>Aplicar</Button>
+                  <Button variant="ghost" size="sm" onClick={() => deletePreset(preset.id)}>Excluir</Button>
+                </div>
+              </div>
+            )) : (
+              <p className="text-sm leading-6 text-[var(--muted-foreground)]">
+                Nenhum recorte salvo ainda. Use isso para guardar cortes como liderança, onboarding, remoto ou exposição alta ao público.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-[1.75rem] border-[rgba(19,34,56,0.08)] bg-white/92 shadow-none">
           <CardHeader>
             <CardTitle className="text-xl">Heatmap de incidência por cargo / função / time</CardTitle>
-            <CardDescription>
-              Mapa das patologias identificadas por agrupamento disponível na base, usando time, função ou área quando presentes.
-            </CardDescription>
           </CardHeader>
           <CardContent className="min-w-0 overflow-hidden pt-2 pb-3">
             <PathologyHeatmapChart rows={companyView.pathologyHeatmap} />
@@ -796,24 +993,18 @@ function CompanySection({
         </Card>
 
         <section className="grid gap-10 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-          <Card className="min-w-0 rounded-[26px] border-[var(--border)] bg-[rgba(255,255,255,0.88)] shadow-[0_18px_45px_rgba(44,62,80,0.06)]">
+          <Card className="rounded-[1.75rem] border-[rgba(19,34,56,0.08)] bg-white/92 shadow-none">
             <CardHeader>
               <CardTitle className="text-xl">Recortes relevantes</CardTitle>
-              <CardDescription>
-                Grupos que concentram mediana pior e merecem acompanhamento priorizado.
-              </CardDescription>
             </CardHeader>
             <CardContent className="pt-2 pb-3">
               <SegmentTable rows={companyView.segmentSnapshots} />
             </CardContent>
           </Card>
 
-          <Card className="min-w-0 rounded-[26px] border-[var(--border)] bg-[rgba(255,255,255,0.88)] shadow-[0_18px_45px_rgba(44,62,80,0.06)]">
+          <Card className="rounded-[1.75rem] border-[rgba(19,34,56,0.08)] bg-white/92 shadow-none">
             <CardHeader>
               <CardTitle className="text-xl">Heatmap dimensional complementar</CardTitle>
-              <CardDescription>
-                Mediana por dimensão em segmentos críticos para aprofundar a leitura do radar.
-              </CardDescription>
             </CardHeader>
             <CardContent className="min-w-0 overflow-hidden pt-2 pb-3">
               <Heatmap rows={companyView.heatmap} />
@@ -822,11 +1013,9 @@ function CompanySection({
         </section>
       </TabsContent>
 
-      <TabsContent value="tecnico" className="space-y-8">
+                <TabsContent value="tecnico" className="space-y-8">
         <SectionHeader
-          eyebrow="Camada técnica"
-          title="Aprofundamento clínico-organizacional"
-          description="Leitura ampliada da triagem para discussão técnica, acompanhamento interno e preparação de devolutivas."
+          title="Camada técnica"
         />
 
         <section className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
@@ -837,20 +1026,18 @@ function CompanySection({
         </section>
 
         <section className="grid gap-10 xl:grid-cols-[minmax(320px,0.8fr)_minmax(0,1.2fr)]">
-          <Card className="min-w-0 rounded-[26px] border-[var(--border)] bg-[rgba(255,255,255,0.88)] shadow-[0_18px_45px_rgba(44,62,80,0.06)]">
+          <Card className="rounded-[1.75rem] border-[rgba(19,34,56,0.08)] bg-white/92 shadow-none">
             <CardHeader>
               <CardTitle className="text-xl">Prevalência técnica de sinais</CardTitle>
-              <CardDescription>Ranking dos principais sinais psicossociais identificados na base atual.</CardDescription>
             </CardHeader>
             <CardContent>
               <ConditionGrid signals={companyView.conditionPrevalence} />
             </CardContent>
           </Card>
 
-          <Card className="min-w-0 rounded-[26px] border-[var(--border)] bg-[rgba(255,255,255,0.88)] shadow-[0_18px_45px_rgba(44,62,80,0.06)]">
+          <Card className="rounded-[1.75rem] border-[rgba(19,34,56,0.08)] bg-white/92 shadow-none">
             <CardHeader>
               <CardTitle className="text-xl">Heatmap individual por dimensão</CardTitle>
-              <CardDescription>Leitura individual, resposta por resposta, para discussão técnica e aprofundamento da devolutiva organizacional.</CardDescription>
             </CardHeader>
             <CardContent className="min-w-0 overflow-hidden">
               <Heatmap rows={companyView.technicalHeatmap} dense />
@@ -858,31 +1045,33 @@ function CompanySection({
           </Card>
         </section>
 
-        <Card>
+        <Card className="rounded-[1.75rem] border-[rgba(19,34,56,0.08)] bg-white/92 shadow-none">
           <CardHeader className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <CardTitle className="text-xl">Tabela técnica de respondentes</CardTitle>
               <CardDescription>Combina faixa de risco, triagem e dimensão mais sensível.</CardDescription>
             </div>
-            <Button variant="outline" onClick={() => window.print()}>Exportar / imprimir</Button>
+            <div className="flex gap-2">
+              <Input
+                value={technicalQuery}
+                onChange={(event) => setTechnicalQuery(event.target.value)}
+                placeholder="Filtrar tabela técnica"
+                className="min-w-[220px]"
+              />
+              <Button variant="outline" onClick={() => window.print()}>Exportar / imprimir</Button>
+            </div>
           </CardHeader>
           <CardContent>
-            <ResponseTable rows={companyView.technicalResponseRows} />
+            <ResponseTable rows={filteredTechnicalRows} />
           </CardContent>
         </Card>
       </TabsContent>
-      </Tabs>
-
-      <CompanyFilterPanel
-        activeFilters={activeFilters}
-        activeFilterChips={activeFilterChips}
-        filterOptions={filterOptions}
-        onChangeFilters={onChangeFilters}
-        onClose={() => setFiltersPanelOpen(false)}
-        open={filtersPanelOpen}
-        sampleSize={companyView.totalResponses}
-      />
-    </div>
+              </div>
+            </SidebarInset>
+          </div>
+        </div>
+      </SidebarProvider>
+    </Tabs>
   );
 }
 
@@ -891,16 +1080,12 @@ function CompanyFilterPanel({
   activeFilterChips,
   filterOptions,
   onChangeFilters,
-  onClose,
-  open,
   sampleSize,
 }: {
   activeFilters: CompanyFilters;
   activeFilterChips: string[];
   filterOptions: DashboardPayload["filterOptions"];
   onChangeFilters: (filters: CompanyFilters) => void;
-  onClose: () => void;
-  open: boolean;
   sampleSize: number;
 }) {
   const hasActiveFilters = hasActiveCompanyFilters(activeFilters);
@@ -920,28 +1105,16 @@ function CompanyFilterPanel({
     onChangeFilters(nextFilters);
   }
 
-  if (!open) return null;
-
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-[rgba(36,49,77,0.18)] backdrop-blur-[2px]">
-      <button type="button" aria-label="Fechar filtros" className="flex-1 cursor-default" onClick={onClose} />
-      <div className="flex h-full w-full max-w-[460px] flex-col border-l border-[var(--border)] bg-[rgba(252,253,255,0.97)] shadow-[-24px_0_60px_rgba(44,62,80,0.16)]">
-        <div className="flex items-start justify-between gap-4 border-b border-[var(--border)] px-5 py-5">
-          <div className="space-y-2">
-            <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--muted-foreground)]">Filtros da visão empresa</p>
-            <div>
-              <h3 className="text-2xl font-semibold tracking-[-0.04em] text-[var(--foreground)]">Refinar recorte</h3>
-              <p className="mt-2 text-sm leading-6 text-[var(--muted-foreground)]">
-                Combine variáveis estruturais e contextuais para localizar melhor a concentração de risco.
-              </p>
-            </div>
+    <Card className="rounded-[1.75rem] border-[rgba(19,34,56,0.08)] bg-white/90 shadow-none">
+      <CardHeader className="flex flex-col gap-4 border-b border-[rgba(19,34,56,0.08)] pb-5 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
+          <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--muted-foreground)]">Filtros da visão empresa</p>
+          <div>
+            <h3 className="text-2xl font-semibold tracking-[-0.04em] text-[var(--foreground)]">Refinar recorte</h3>
           </div>
-          <Button type="button" variant="outline" size="icon" className="h-10 w-10 rounded-full" onClick={onClose}>
-            <X className="h-4 w-4" />
-          </Button>
         </div>
-
-        <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
+        <div className="flex flex-wrap items-center gap-3">
           <Badge variant="outline">{sampleSize} pessoas no recorte</Badge>
           {hasActiveFilters ? (
             <Button variant="outline" size="sm" onClick={() => onChangeFilters(getDefaultCompanyFilters())}>
@@ -950,9 +1123,9 @@ function CompanyFilterPanel({
             </Button>
           ) : null}
         </div>
-
-        <div className="flex-1 space-y-6 overflow-y-auto px-5 py-5">
-          <div className="grid gap-4 md:grid-cols-2">
+      </CardHeader>
+      <CardContent className="space-y-6 p-6">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <FilterSelect
             label="Time"
             value={activeFilters.team}
@@ -978,13 +1151,13 @@ function CompanyFilterPanel({
             onChange={(value) => updateFilter("workModel", value as CompanyFilters["workModel"])}
           />
           <FilterSelect
-            label="Lideranca"
+            label="Liderança"
             value={activeFilters.leadership}
             options={filterOptions.leadership.map((value) => ({ value, label: triageLabels.leadership[value] }))}
             onChange={(value) => updateFilter("leadership", value as CompanyFilters["leadership"])}
           />
           <FilterSelect
-            label="Exposicao ao publico"
+            label="Exposição ao público"
             value={activeFilters.publicExposure}
             options={filterOptions.publicExposure.map((value) => ({ value, label: triageLabels.publicExposure[value] }))}
             onChange={(value) => updateFilter("publicExposure", value as CompanyFilters["publicExposure"])}
@@ -1008,13 +1181,13 @@ function CompanyFilterPanel({
             onChange={(value) => updateFilter("energyLevel", value as CompanyFilters["energyLevel"])}
           />
           <FilterSelect
-            label="Pressao emocional"
+            label="Pressão emocional"
             value={activeFilters.emotionalPressure}
             options={filterOptions.emotionalPressure.map((value) => ({ value, label: triageLabels.emotionalPressure[value] }))}
             onChange={(value) => updateFilter("emotionalPressure", value as CompanyFilters["emotionalPressure"])}
           />
           <FilterSelect
-            label="Motivacao"
+            label="Motivação"
             value={activeFilters.motivationLevel}
             options={filterOptions.motivationLevel.map((value) => ({ value, label: triageLabels.motivationLevel[value] }))}
             onChange={(value) => updateFilter("motivationLevel", value as CompanyFilters["motivationLevel"])}
@@ -1028,22 +1201,19 @@ function CompanyFilterPanel({
         </div>
 
         {activeFilterChips.length ? (
-          <div className="space-y-3">
+          <div className="space-y-3 border-t border-[rgba(19,34,56,0.08)] pt-4">
             <p className="text-sm font-semibold text-[var(--foreground)]">Filtros ativos</p>
             <div className="flex flex-wrap gap-2">
-            {activeFilterChips.map((chip) => (
-              <Badge key={chip} variant="outline">{chip}</Badge>
-            ))}
-          </div>
+              {activeFilterChips.map((chip) => (
+                <Badge key={chip} variant="outline">{chip}</Badge>
+              ))}
+            </div>
           </div>
         ) : (
-          <p className="text-sm text-[var(--muted-foreground)]">
-            Nenhum filtro aplicado. O painel esta mostrando a base consolidada da empresa.
-          </p>
+          <p className="text-sm text-[var(--muted-foreground)]">Sem filtros aplicados.</p>
         )}
-        </div>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -1074,21 +1244,16 @@ function FilterSelect({
 }
 
 function SectionHeader({
-  eyebrow,
   title,
   description,
 }: {
-  eyebrow: string;
   title: string;
-  description: string;
+  description?: string;
 }) {
   return (
-    <div className="flex flex-col gap-3 rounded-[2rem] border border-[var(--border)] bg-[rgba(255,255,255,0.76)] px-5 py-5 shadow-[0_14px_36px_rgba(129,155,179,0.08)] lg:px-6">
-      <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-[var(--muted-foreground)]">{eyebrow}</p>
-      <div className="space-y-1">
-        <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[var(--foreground)]">{title}</h2>
-        <p className="max-w-4xl text-sm leading-7 text-[var(--muted-foreground)] md:text-base">{description}</p>
-      </div>
+    <div className="space-y-1">
+      <h3 className="text-lg font-semibold tracking-tight">{title}</h3>
+      {description ? <p className="text-sm text-[var(--muted-foreground)]">{description}</p> : null}
     </div>
   );
 }
@@ -1098,58 +1263,60 @@ function KpiCard({
   value,
   helper,
   valueClassName,
-  centered = false,
-  variant = "default",
 }: {
   label: string;
   value: string;
-  helper: string;
+  helper?: string;
   valueClassName?: string;
   centered?: boolean;
   variant?: "default" | "individual";
 }) {
-  if (variant === "individual") {
-    return (
-        <Card className="overflow-hidden rounded-[2rem] border-[rgba(191,211,226,0.9)] bg-[rgba(255,255,255,0.96)] shadow-[0_18px_42px_rgba(129,155,179,0.12)]">
-          <CardContent className="flex min-h-[182px] flex-col justify-between p-0">
-          <div className="space-y-5 px-6 pt-6">
-            <div className="inline-flex w-fit rounded-full border border-[rgba(106,161,160,0.16)] bg-[rgba(238,246,246,0.92)] px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--muted-foreground)]">
-              {label}
-            </div>
-            <p
-              className={cn(
-                "max-w-full pl-2 pr-2 text-left text-5xl font-semibold tracking-[-0.06em] text-[var(--foreground)]",
-                valueClassName
-              )}
-            >
-              {value}
-            </p>
-          </div>
-          <div className="px-6 pb-5 pl-8 pr-3 text-left text-sm font-medium text-[var(--primary)]">
-            {helper}
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
   return (
-    <Card className="metric-card">
-      <CardContent className={cn("flex min-h-[204px] flex-col p-0", centered && "items-center text-center")}>
-        <p className={cn("font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--muted-foreground)]", centered && "w-full text-left")}>
-          {label}
-        </p>
-        <p
-          className={cn(
-            "mt-4 text-5xl font-semibold leading-[0.98] tracking-[-0.06em] text-[var(--foreground)]",
-            valueClassName
-          )}
-        >
-          {value}
-        </p>
-        <p className="mt-auto pt-3 text-sm text-[var(--primary)]">{helper}</p>
+    <Card className="frost-card rounded-[1.5rem] border-[rgba(255,255,255,0.56)] bg-white/84 shadow-none">
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium text-[var(--muted-foreground)]">{label}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className={cn("text-3xl font-semibold tracking-[-0.04em]", valueClassName)}>{value}</div>
+        {helper ? <p className="mt-2 text-xs uppercase tracking-[0.16em] text-[var(--muted-foreground)]">{helper}</p> : null}
       </CardContent>
     </Card>
+  );
+}
+
+function HeroMetricCard({
+  label,
+  value,
+  helper,
+}: {
+  label: string;
+  value: string;
+  helper: string;
+}) {
+  return (
+    <Card className="frost-card rounded-[1.5rem] border-[rgba(255,255,255,0.6)] bg-[linear-gradient(180deg,rgba(255,255,255,0.94)_0%,rgba(246,251,252,0.84)_100%)] shadow-none">
+      <CardContent className="space-y-4 p-5">
+        <div className="space-y-2">
+          <p className="text-sm text-[var(--muted-foreground)]">{label}</p>
+          <p className="text-4xl font-semibold tracking-[-0.05em] text-[var(--foreground)]">{value}</p>
+        </div>
+        <div className="space-y-2">
+          <div className="h-2 rounded-full bg-[rgba(19,34,56,0.08)]">
+            <div className="h-full w-2/3 rounded-full bg-[linear-gradient(90deg,var(--primary),var(--brand-teal))]" />
+          </div>
+          <p className="text-sm text-[var(--muted-foreground)]">{helper}</p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function SidebarMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[1rem] border border-[rgba(255,255,255,0.52)] bg-[linear-gradient(180deg,rgba(223,243,240,0.72),rgba(255,255,255,0.74))] px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.76)]">
+      <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--muted-foreground)]">{label}</p>
+      <p className="mt-2 text-xl font-semibold tracking-[-0.03em] text-[var(--foreground)]">{value}</p>
+    </div>
   );
 }
 
@@ -1159,27 +1326,28 @@ function TokenChip({ value, used, active }: { value: string; used: boolean; acti
   }
 
   return (
-    <button
+    <Button
       type="button"
+      variant="outline"
       onClick={() => void handleCopy()}
       className={cn(
-        "inline-flex items-center gap-2 rounded-full border px-3 py-2 text-left text-xs font-medium transition-colors",
+        "h-auto max-w-full justify-start gap-2 rounded-full px-3 py-2 text-left text-xs font-medium",
         active === false
-          ? "border-[rgba(136,163,191,0.2)] bg-[rgba(243,246,249,0.95)] text-[var(--muted-foreground)]"
+          ? "border-[rgba(136,163,191,0.2)] bg-[rgba(243,246,249,0.95)] text-[var(--muted-foreground)] hover:bg-[rgba(243,246,249,0.95)]"
           : used
-          ? "border-[rgba(106,161,160,0.24)] bg-[rgba(238,246,246,0.92)] text-[var(--foreground)]"
-          : "border-[var(--border)] bg-[var(--accent)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+            ? "border-[rgba(106,161,160,0.24)] bg-[rgba(238,246,246,0.92)] text-[var(--foreground)] hover:bg-[rgba(238,246,246,0.92)]"
+            : "border-[var(--border)] bg-[var(--accent)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
       )}
     >
       <Copy className="h-3.5 w-3.5" />
       <span className="break-all">{value}</span>
       {active === false ? <span className="text-[10px] uppercase tracking-[0.12em]">inativo</span> : null}
       {active !== false && used ? <span className="text-[10px] uppercase tracking-[0.12em]">usado</span> : null}
-    </button>
+    </Button>
   );
 }
 
-function TokenSettingsModal({
+function TokenOperationsModal({
   accessToken,
   companyAccess,
   companyLabel,
@@ -1196,8 +1364,6 @@ function TokenSettingsModal({
 }) {
   const [pendingToken, setPendingToken] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-
-  if (!open) return null;
 
   const tokenGroups = [
     { title: "Visão empresa", tokens: companyAccess.companyTokens },
@@ -1245,30 +1411,32 @@ function TokenSettingsModal({
     );
   }
 
+  if (!open) return null;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(36,49,77,0.34)] px-4 py-6">
-      <div className="w-full max-w-5xl rounded-[28px] border border-[var(--border)] bg-[rgba(255,255,255,0.97)] shadow-[0_30px_80px_rgba(36,49,77,0.24)]">
-        <div className="flex items-start justify-between gap-4 border-b border-[var(--border)] px-6 py-5">
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-[rgba(19,34,56,0.36)] px-4 py-10 backdrop-blur-sm">
+      <div className="w-full max-w-5xl rounded-[1.75rem] border border-[rgba(19,34,56,0.08)] bg-white shadow-[0_30px_80px_rgba(19,34,56,0.18)]">
+        <div className="flex items-start justify-between gap-4 border-b border-[rgba(19,34,56,0.08)] px-6 py-5">
           <div>
-            <h3 className="text-xl font-semibold tracking-[-0.04em] text-[var(--foreground)]">Configurações de tokens</h3>
-            <p className="mt-2 text-sm text-[var(--muted-foreground)]">
-              {companyLabel}. O token institucional é fixo. Nos tokens individuais, resetar remove o vínculo atual; inativar bloqueia o uso; excluir remove o token do sistema.
+            <h3 className="text-xl font-semibold tracking-[-0.04em] text-[var(--foreground)]">Gestão dos tokens</h3>
+            <p className="mt-2 text-sm leading-6 text-[var(--muted-foreground)]">
+              {companyLabel}. O token institucional é fixo. Nos tokens individuais, resetar remove o vínculo atual, inativar bloqueia o uso e excluir remove o token do sistema.
             </p>
           </div>
-          <Button type="button" variant="ghost" size="icon" className="h-10 w-10 rounded-full" onClick={onClose}>
+          <Button type="button" variant="ghost" size="icon" className="rounded-full" onClick={onClose}>
             <X className="h-4 w-4" />
           </Button>
         </div>
 
-        <div className="max-h-[72vh] space-y-6 overflow-y-auto px-6 py-6">
+        <div className="max-h-[75vh] space-y-5 overflow-y-auto px-6 py-6">
           {status ? (
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--accent)] px-4 py-3 text-sm text-[var(--muted-foreground)]">
+            <div className="rounded-[1rem] border border-[var(--border)] bg-[var(--accent)] px-4 py-3 text-sm text-[var(--muted-foreground)]">
               {status}
             </div>
           ) : null}
 
           {tokenGroups.map((group) => (
-            <section key={group.title} className="space-y-4">
+            <section key={group.title} className="space-y-3">
               <div className="flex items-center gap-2 text-sm font-semibold text-[var(--foreground)]">
                 {group.title === "Visão empresa" ? <ShieldAlert className="h-4 w-4 text-[var(--primary)]" /> : <KeyRound className="h-4 w-4 text-[var(--primary)]" />}
                 {group.title}
@@ -1280,25 +1448,25 @@ function TokenSettingsModal({
                   const isInstitutionalToken = token.tokenType === "company";
 
                   return (
-                    <div key={token.value} className="rounded-[22px] border border-[var(--border)] bg-white px-4 py-4 shadow-sm">
-                      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                    <Card key={token.value} className="rounded-[1.25rem] border-[rgba(19,34,56,0.08)] bg-white shadow-none">
+                      <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
                         <div className="space-y-2">
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="text-sm font-semibold text-[var(--foreground)]">{token.label}</p>
-                            <span className="rounded-full border border-[var(--border)] bg-[var(--accent)] px-2.5 py-1 text-[10px] font-mono uppercase tracking-[0.14em] text-[var(--muted-foreground)]">
+                            <Badge variant="outline" className="rounded-full">
                               {token.tokenType === "company" ? "empresa" : "individual"}
-                            </span>
-                            <span className="rounded-full border border-[var(--border)] bg-[var(--accent)] px-2.5 py-1 text-[10px] font-mono uppercase tracking-[0.14em] text-[var(--muted-foreground)]">
+                            </Badge>
+                            <Badge variant="secondary" className="rounded-full">
                               {token.active ? (token.used ? "usado" : "ativo") : "inativo"}
-                            </span>
+                            </Badge>
                           </div>
-                          <p className="break-all text-sm tracking-[0.08em] text-[var(--foreground)]">{token.value}</p>
+                          <p className="break-all text-sm text-[var(--foreground)]">{token.value}</p>
                         </div>
 
                         {isInstitutionalToken ? (
-                          <div className="rounded-full border border-[var(--border)] bg-[var(--accent)] px-3 py-2 text-xs font-medium text-[var(--muted-foreground)]">
+                          <Badge variant="outline" className="rounded-full px-3 py-2 text-xs">
                             Token institucional protegido
-                          </div>
+                          </Badge>
                         ) : (
                           <div className="flex flex-wrap gap-2">
                             <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void handleTokenAction(token.value, "reset")}>
@@ -1315,8 +1483,8 @@ function TokenSettingsModal({
                             </Button>
                           </div>
                         )}
-                      </div>
-                    </div>
+                      </CardContent>
+                    </Card>
                   );
                 })}
               </div>
@@ -1381,12 +1549,12 @@ function InsightCard({ title, detail, tone }: { title: string; detail: string; t
   return (
     <div
       className={cn(
-        "rounded-2xl border p-4",
+        "rounded-2xl border p-4 shadow-[0_18px_34px_rgba(19,34,56,0.06)] backdrop-blur-sm",
         tone === "attention"
-          ? "border-[rgba(255,91,127,0.18)] bg-[rgba(255,245,248,0.92)]"
+          ? "border-[rgba(255,91,127,0.16)] bg-[rgba(255,245,248,0.84)]"
           : tone === "positive"
-            ? "border-[rgba(106,161,160,0.18)] bg-[rgba(241,248,247,0.92)]"
-            : "border-[var(--border)] bg-white"
+            ? "border-[rgba(47,143,138,0.18)] bg-[rgba(223,243,240,0.74)]"
+            : "border-[rgba(255,255,255,0.56)] bg-[rgba(255,255,255,0.76)]"
       )}
     >
       <p className="text-sm font-semibold">{title}</p>
@@ -1415,9 +1583,29 @@ function MiniMetric({
   );
 }
 
+function BenchmarkCard({ metric }: { metric: BenchmarkMetric }) {
+  const suffix = metric.format === "count" ? "" : "%";
+  const deltaLabel = `${metric.delta > 0 ? "+" : ""}${metric.delta.toFixed(0)}${suffix}`;
+
+  return (
+    <div className="group rounded-[1.4rem] border border-[rgba(255,255,255,0.58)] bg-[linear-gradient(180deg,rgba(255,255,255,0.82),rgba(246,250,251,0.76))] px-4 py-4 shadow-[0_18px_34px_rgba(19,34,56,0.06),inset_0_1px_0_rgba(255,255,255,0.72)] transition-all duration-200 hover:bg-[rgba(255,255,255,0.95)] hover:shadow-[0_10px_26px_rgba(19,34,56,0.08)]">
+      <p className="text-xs uppercase tracking-[0.16em] text-[var(--muted-foreground)]">{metric.label}</p>
+      <p className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-[var(--foreground)]">
+        {metric.currentValue.toFixed(0)}{suffix}
+      </p>
+      <p className="mt-2 text-sm text-[var(--muted-foreground)]">
+        Base total: {metric.baselineValue.toFixed(0)}{suffix}
+      </p>
+      <Badge variant="outline" className="mt-3">
+        Delta {deltaLabel}
+      </Badge>
+    </div>
+  );
+}
+
 function DimensionBar({ dimension, score }: { dimension: Dimension; score: number }) {
   return (
-    <div className="rounded-xl border border-[var(--border)] bg-white p-4 shadow-sm">
+    <div className="rounded-xl border border-[rgba(255,255,255,0.58)] bg-[rgba(255,255,255,0.8)] p-4 shadow-[0_16px_30px_rgba(19,34,56,0.06)] backdrop-blur-sm">
       <div className="flex items-center justify-between gap-3">
         <Badge variant="outline" className={cn("border", badgeByDimension[dimension])}>{dimension}</Badge>
         <span className="text-sm font-semibold text-[var(--foreground)]">{score.toFixed(2)}</span>
@@ -1434,7 +1622,7 @@ function ConditionGrid({ signals, compact = false }: { signals: ConditionSignal[
   return (
     <div className={cn("grid gap-3", compact ? "md:grid-cols-1" : "md:grid-cols-2")}>
       {signals.map((signal) => (
-        <div key={signal.name} className="rounded-xl border border-[var(--border)] bg-white p-4 shadow-sm">
+        <div key={signal.name} className="rounded-xl border border-[rgba(255,255,255,0.58)] bg-[rgba(255,255,255,0.8)] p-4 shadow-[0_16px_30px_rgba(19,34,56,0.06)] backdrop-blur-sm">
           <div className="flex items-center justify-between gap-3">
             <p className="text-sm font-semibold text-[var(--foreground)]">{signal.name}</p>
             <Badge variant="outline">{signal.prevalence}%</Badge>
@@ -1662,29 +1850,296 @@ function SegmentTable({ rows }: { rows: CompanyView["segmentSnapshots"] }) {
   }
 
   return (
-    <div className="overflow-x-auto">
-      <table className="min-w-full text-left text-sm">
-        <thead className="text-[var(--muted-foreground)]">
-          <tr>
-            <th className="px-3 py-2 font-medium">Segmento</th>
-            <th className="px-3 py-2 font-medium">Base</th>
-            <th className="px-3 py-2 font-medium">Mediana</th>
-            <th className="px-3 py-2 font-medium">Faixa</th>
-            <th className="px-3 py-2 font-medium">Maior atenção</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.segment} className="border-t border-[var(--border)]">
-              <td className="px-3 py-3 font-medium">{row.segment}</td>
-              <td className="px-3 py-3">{row.count}</td>
-              <td className="px-3 py-3">{row.median.toFixed(2)}</td>
-              <td className="px-3 py-3">{row.riskBand}</td>
-              <td className="px-3 py-3">{row.topDimension}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Segmento</TableHead>
+          <TableHead>Base</TableHead>
+          <TableHead>Mediana</TableHead>
+          <TableHead>Faixa</TableHead>
+          <TableHead>Maior atenção</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((row) => (
+          <TableRow key={row.segment}>
+            <TableCell className="font-medium">{row.segment}</TableCell>
+            <TableCell>{row.count}</TableCell>
+            <TableCell>{row.median.toFixed(2)}</TableCell>
+            <TableCell>{row.riskBand}</TableCell>
+            <TableCell>{row.topDimension}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
+function getDefaultComparisonSelection(groups: ComparisonGroup[]) {
+  if (groups.length < 2) return null;
+
+  return {
+    groupAId: groups[0].id,
+    groupBId: groups[1].id,
+  };
+}
+
+function getAvailableComparisonKinds(groups: ComparisonGroup[]) {
+  const orderedKinds: ComparisonGroupKind[] = ["team", "role", "area"];
+  return orderedKinds.filter((kind) => groups.filter((group) => group.kind === kind).length >= 2);
+}
+
+function getComparisonKindLabel(kind: ComparisonGroupKind) {
+  if (kind === "team") return "Time";
+  if (kind === "role") return "Função";
+  return "Área";
+}
+
+function formatDelta(value: number, suffix = "") {
+  const rounded = Number(value.toFixed(0));
+  const prefix = rounded > 0 ? "+" : "";
+  return `${prefix}${rounded}${suffix}`;
+}
+
+function GroupComparisonCard({
+  groups,
+  comparisonKind,
+  availableKinds,
+  groupAId,
+  groupBId,
+  onChangeComparisonKind,
+  onChangeGroupA,
+  onChangeGroupB,
+}: {
+  groups: CompanyView["comparisonGroups"];
+  comparisonKind: ComparisonGroupKind;
+  availableKinds: ComparisonGroupKind[];
+  groupAId: string;
+  groupBId: string;
+  onChangeComparisonKind: (value: ComparisonGroupKind) => void;
+  onChangeGroupA: (value: string) => void;
+  onChangeGroupB: (value: string) => void;
+}) {
+  if (!availableKinds.length) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-xl">Comparação entre grupos</CardTitle>
+          <CardDescription>
+            A comparação direta aparece quando existem pelo menos dois grupos do mesmo tipo com respostas no recorte atual.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm leading-6 text-[var(--muted-foreground)]">
+            Ainda não há dois grupos distintos do mesmo tipo para comparar por time, função ou área neste recorte.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const scopedGroups = groups.filter((group) => group.kind === comparisonKind);
+  const groupA = scopedGroups.find((group) => group.id === groupAId) ?? scopedGroups[0];
+  const fallbackGroupB = scopedGroups.find((group) => group.id !== groupA.id) ?? scopedGroups[1];
+  const groupB = scopedGroups.find((group) => group.id === groupBId && group.id !== groupA.id) ?? fallbackGroupB;
+  const wellbeingDelta = groupA.wellbeingIndex - groupB.wellbeingIndex;
+  const burnoutDelta = groupA.burnoutRiskShare - groupB.burnoutRiskShare;
+  const anxietyDelta = groupA.anxietyRiskShare - groupB.anxietyRiskShare;
+  const mostDivergentDimension = [...groupA.dimensionScores]
+    .map((dimension) => {
+      const otherDimension = groupB.dimensionScores.find((item) => item.dimension === dimension.dimension);
+      return {
+        dimension: dimension.dimension,
+        delta: dimension.median - (otherDimension?.median ?? 0),
+      };
+    })
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))[0];
+
+  const leadingGroupForWellbeing = wellbeingDelta >= 0 ? groupA.shortLabel : groupB.shortLabel;
+  const leadingGroupForBurnout = burnoutDelta >= 0 ? groupA.shortLabel : groupB.shortLabel;
+  const leadingGroupForAnxiety = anxietyDelta >= 0 ? groupA.shortLabel : groupB.shortLabel;
+  const hasSmallSample = groupA.count < 3 || groupB.count < 3;
+
+  return (
+    <Card>
+      <CardHeader className="space-y-4">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+          <div>
+            <CardTitle className="text-xl">Comparação entre grupos</CardTitle>
+            <CardDescription>
+              Escolha o tipo do recorte e compare grupos equivalentes para ler delta de bem-estar, burnout, ansiedade e a dimensão que mais separa os recortes.
+            </CardDescription>
+          </div>
+          <Badge variant="outline" className="w-fit">{scopedGroups.length} grupos de {getComparisonKindLabel(comparisonKind).toLowerCase()} comparáveis</Badge>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-3">
+          <label className="space-y-2">
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted-foreground)]">Tipo de comparação</span>
+            <Select
+              value={comparisonKind}
+              onChange={(event) => onChangeComparisonKind(event.target.value as ComparisonGroupKind)}
+            >
+              {availableKinds.map((kind) => (
+                <option key={kind} value={kind}>
+                  {getComparisonKindLabel(kind)}
+                </option>
+              ))}
+            </Select>
+          </label>
+
+          <label className="space-y-2">
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted-foreground)]">Grupo A</span>
+            <Select value={groupA.id} onChange={(event) => onChangeGroupA(event.target.value)}>
+              {scopedGroups.map((group) => (
+                <option key={group.id} value={group.id}>
+                  {group.shortLabel} ({group.count})
+                </option>
+              ))}
+            </Select>
+          </label>
+
+          <label className="space-y-2">
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted-foreground)]">Grupo B</span>
+            <Select value={groupB.id} onChange={(event) => onChangeGroupB(event.target.value)}>
+              {scopedGroups
+                .filter((group) => group.id !== groupA.id)
+                .map((group) => (
+                  <option key={group.id} value={group.id}>
+                    {group.shortLabel} ({group.count})
+                  </option>
+                ))}
+            </Select>
+          </label>
+        </div>
+
+        {hasSmallSample ? (
+          <div className="rounded-[1.2rem] border border-[var(--border)] bg-[rgba(255,255,255,0.72)] px-4 py-3 text-sm leading-6 text-[var(--muted-foreground)]">
+            Comparação exibida com base pequena. Um ou ambos os grupos ainda têm menos de 3 respostas, então os deltas servem como sinal inicial e não como conclusão estatisticamente estável.
+          </div>
+        ) : null}
+      </CardHeader>
+
+      <CardContent className="space-y-6">
+        <section className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+          <div className="grid gap-4 md:grid-cols-2">
+            {[groupA, groupB].map((group, index) => (
+              <div
+                key={group.id}
+                className={cn(
+                  "rounded-[1.6rem] border px-5 py-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)]",
+                  index === 0
+                    ? "border-[rgba(36,49,77,0.14)] bg-[rgba(36,49,77,0.06)]"
+                    : "border-[rgba(94,138,136,0.18)] bg-[rgba(223,238,237,0.72)]"
+                )}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
+                      Grupo {index === 0 ? "A" : "B"}
+                    </p>
+                    <h3 className="mt-2 text-lg font-semibold tracking-[-0.03em] text-[var(--foreground)]">{group.shortLabel}</h3>
+                    <p className="mt-1 text-sm text-[var(--muted-foreground)]">{group.label}</p>
+                  </div>
+                  <Badge variant="outline">{group.count} pessoas</Badge>
+                </div>
+
+                <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-[1.1rem] border border-[var(--border)] bg-white/80 px-4 py-3">
+                    <p className="text-xs uppercase tracking-[0.14em] text-[var(--muted-foreground)]">Bem-estar</p>
+                    <p className="mt-2 text-2xl font-semibold text-[var(--foreground)]">{group.wellbeingIndex.toFixed(0)}%</p>
+                  </div>
+                  <div className="rounded-[1.1rem] border border-[var(--border)] bg-white/80 px-4 py-3">
+                    <p className="text-xs uppercase tracking-[0.14em] text-[var(--muted-foreground)]">Burnout alto</p>
+                    <p className="mt-2 text-2xl font-semibold text-[var(--foreground)]">{group.burnoutRiskShare.toFixed(0)}%</p>
+                  </div>
+                  <div className="rounded-[1.1rem] border border-[var(--border)] bg-white/80 px-4 py-3">
+                    <p className="text-xs uppercase tracking-[0.14em] text-[var(--muted-foreground)]">Ansiedade alta</p>
+                    <p className="mt-2 text-2xl font-semibold text-[var(--foreground)]">{group.anxietyRiskShare.toFixed(0)}%</p>
+                  </div>
+                  <div className="rounded-[1.1rem] border border-[var(--border)] bg-white/80 px-4 py-3">
+                    <p className="text-xs uppercase tracking-[0.14em] text-[var(--muted-foreground)]">Dimensão sensível</p>
+                    <p className="mt-2 text-base font-semibold leading-6 text-[var(--foreground)]">{group.weakestDimension}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="rounded-[1.7rem] border border-[var(--border)] bg-white/80 px-5 py-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted-foreground)]">Delta A vs B</p>
+            <div className="mt-4 grid gap-3">
+              <ComparisonDeltaRow
+                label="Bem-estar"
+                delta={formatDelta(wellbeingDelta, " pts")}
+                helper={`${leadingGroupForWellbeing} aparece melhor posicionado neste eixo.`}
+                positive={wellbeingDelta >= 0}
+              />
+              <ComparisonDeltaRow
+                label="Burnout alto"
+                delta={formatDelta(burnoutDelta, " p.p.")}
+                helper={`${leadingGroupForBurnout} concentra mais risco de burnout.`}
+                positive={burnoutDelta <= 0}
+              />
+              <ComparisonDeltaRow
+                label="Ansiedade alta"
+                delta={formatDelta(anxietyDelta, " p.p.")}
+                helper={`${leadingGroupForAnxiety} concentra mais risco de ansiedade.`}
+                positive={anxietyDelta <= 0}
+              />
+            </div>
+
+            <div className="mt-5 rounded-[1.3rem] border border-[var(--border)] bg-[var(--accent)] px-4 py-4">
+              <p className="text-sm font-semibold text-[var(--foreground)]">Maior distância dimensional</p>
+              <p className="mt-2 text-sm leading-6 text-[var(--muted-foreground)]">
+                {mostDivergentDimension
+                  ? `${mostDivergentDimension.dimension} é o eixo que mais separa os grupos, com ${formatDelta(mostDivergentDimension.delta, " pts")} na mediana do Grupo A em relação ao Grupo B.`
+                  : "Não foi possível identificar uma distância dimensional relevante entre os grupos selecionados."}
+              </p>
+            </div>
+
+            <div className="mt-4 rounded-[1.3rem] border border-[var(--border)] bg-[rgba(255,255,255,0.88)] px-4 py-4">
+              <p className="text-sm font-semibold text-[var(--foreground)]">Leitura rápida para RH e liderança</p>
+              <p className="mt-2 text-sm leading-6 text-[var(--muted-foreground)]">
+                {groupA.shortLabel} vs {groupB.shortLabel}: o gap principal hoje aparece em{" "}
+                {mostDivergentDimension?.dimension ?? "bem-estar geral"}, com {leadingGroupForBurnout} e {leadingGroupForAnxiety} exigindo
+                mais atenção quando o foco for risco emocional sustentado.
+              </p>
+            </div>
+          </div>
+        </section>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ComparisonDeltaRow({
+  label,
+  delta,
+  helper,
+  positive,
+}: {
+  label: string;
+  delta: string;
+  helper: string;
+  positive: boolean;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4 rounded-[1.2rem] border border-[var(--border)] bg-[rgba(248,250,250,0.92)] px-4 py-4">
+      <div>
+        <p className="text-sm font-semibold text-[var(--foreground)]">{label}</p>
+        <p className="mt-1 text-sm leading-6 text-[var(--muted-foreground)]">{helper}</p>
+      </div>
+      <span
+        className={cn(
+          "rounded-full px-3 py-1 text-sm font-semibold",
+          positive
+            ? "bg-[rgba(137,184,182,0.18)] text-[var(--foreground)]"
+            : "bg-[rgba(36,49,77,0.10)] text-[var(--foreground)]"
+        )}
+      >
+        {delta}
+      </span>
     </div>
   );
 }
@@ -1693,68 +2148,80 @@ function QuestionTable({ rows }: { rows: QuestionScore[] }) {
   const ordered = [...rows].sort((a, b) => a.median - b.median);
 
   return (
-    <div className="overflow-x-auto">
-      <table className="min-w-full text-left text-sm">
-        <thead className="text-[var(--muted-foreground)]">
-          <tr>
-            <th className="px-3 py-2 font-medium">Fator</th>
-            <th className="px-3 py-2 font-medium">Dimensão</th>
-            <th className="px-3 py-2 font-medium">Mediana</th>
-            <th className="px-3 py-2 font-medium">Média</th>
-            <th className="px-3 py-2 font-medium">Baixo escore</th>
-          </tr>
-        </thead>
-        <tbody>
-          {ordered.map((row) => (
-            <tr key={row.id} className="border-t border-[var(--border)] align-top">
-              <td className="px-3 py-3"><p className="font-medium text-[var(--foreground)]">{row.text}</p></td>
-              <td className="px-3 py-3">
-                <Badge variant="outline" className={cn("border", badgeByDimension[row.dimension])}>{row.dimension}</Badge>
-              </td>
-              <td className="px-3 py-3">{row.median.toFixed(2)}</td>
-              <td className="px-3 py-3">{row.average.toFixed(2)}</td>
-              <td className="px-3 py-3">{row.lowShare.toFixed(0)}%</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Fator</TableHead>
+          <TableHead>Dimensão</TableHead>
+          <TableHead>Mediana</TableHead>
+          <TableHead>Média</TableHead>
+          <TableHead>Baixo escore</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {ordered.map((row) => (
+          <TableRow key={row.id}>
+            <TableCell><p className="font-medium text-[var(--foreground)]">{row.text}</p></TableCell>
+            <TableCell>
+              <Badge variant="outline" className={cn("border", badgeByDimension[row.dimension])}>{row.dimension}</Badge>
+            </TableCell>
+            <TableCell>{row.median.toFixed(2)}</TableCell>
+            <TableCell>{row.average.toFixed(2)}</TableCell>
+            <TableCell>{row.lowShare.toFixed(0)}%</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 
 function ResponseTable({ rows }: { rows: CompanyView["technicalResponseRows"] }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="min-w-full text-left text-sm">
-        <thead className="text-[var(--muted-foreground)]">
-          <tr>
-            <th className="px-3 py-2 font-medium">Respondente</th>
-            <th className="px-3 py-2 font-medium">Índice</th>
-            <th className="px-3 py-2 font-medium">Faixa</th>
-            <th className="px-3 py-2 font-medium">Sobrecarga</th>
-            <th className="px-3 py-2 font-medium">Sono</th>
-            <th className="px-3 py-2 font-medium">Pressão</th>
-            <th className="px-3 py-2 font-medium">Mais sensível</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.id} className="border-t border-[var(--border)] align-top">
-              <td className="px-3 py-3">
-                <p className="font-medium text-[var(--foreground)]">{row.team || "Sem time"}</p>
-                <p className="text-xs text-[var(--muted-foreground)]">{row.role || "Sem função"} · {new Date(row.submittedAt).toLocaleDateString("pt-BR")}</p>
-              </td>
-              <td className="px-3 py-3">{row.overallAverage.toFixed(2)}</td>
-              <td className="px-3 py-3">{row.riskBand}</td>
-              <td className="px-3 py-3">{formatTriagedValue(row.recentOverload)}</td>
-              <td className="px-3 py-3">{formatTriagedValue(row.sleepQuality)}</td>
-              <td className="px-3 py-3">{formatTriagedValue(row.emotionalPressure)}</td>
-              <td className="px-3 py-3">{row.weakestDimension}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Respondente</TableHead>
+          <TableHead>Estrutura</TableHead>
+          <TableHead>Índice</TableHead>
+          <TableHead>Faixa</TableHead>
+          <TableHead>Sobrecarga</TableHead>
+          <TableHead>Sono</TableHead>
+          <TableHead>Pressão</TableHead>
+          <TableHead>Mais sensível</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((row) => (
+          <TableRow key={row.id}>
+            <TableCell>
+              <p className="font-medium text-[var(--foreground)]">{row.pseudonymId ?? row.id}</p>
+              <p className="text-xs text-[var(--muted-foreground)]">{new Date(row.submittedAt).toLocaleDateString("pt-BR")}</p>
+            </TableCell>
+            <TableCell>
+              {row.protectedGroup ? (
+                <div>
+                  <p className="font-medium text-[var(--foreground)]">Grupo protegido (&lt;3)</p>
+                  <p className="text-xs text-[var(--muted-foreground)]">Detalhes estruturais ocultados</p>
+                </div>
+              ) : (
+                <div>
+                  <p className="font-medium text-[var(--foreground)]">{row.team || "Sem time"}</p>
+                  <p className="text-xs text-[var(--muted-foreground)]">
+                    {row.role || "Sem função"} {row.area ? `· ${row.area}` : ""}
+                  </p>
+                </div>
+              )}
+            </TableCell>
+            <TableCell>{row.overallAverage.toFixed(2)}</TableCell>
+            <TableCell>{row.riskBand}</TableCell>
+            <TableCell>{formatTriagedValue(row.recentOverload)}</TableCell>
+            <TableCell>{formatTriagedValue(row.sleepQuality)}</TableCell>
+            <TableCell>{formatTriagedValue(row.emotionalPressure)}</TableCell>
+            <TableCell>{row.weakestDimension}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 
@@ -1783,7 +2250,7 @@ function buildActiveFilterChips(filters: CompanyFilters) {
   const chips: string[] = [];
 
   if (filters.team !== "all") chips.push(`Time: ${filters.team}`);
-  if (filters.area !== "all") chips.push(`Area: ${filters.area}`);
+  if (filters.area !== "all") chips.push(`Área: ${filters.area}`);
   if (filters.tenureBand !== "all") chips.push(`Tempo: ${getTenureBandLabel(filters.tenureBand)}`);
   if (filters.workModel !== "all") chips.push(triageLabels.workModel[filters.workModel]);
   if (filters.leadership !== "all") chips.push(triageLabels.leadership[filters.leadership]);

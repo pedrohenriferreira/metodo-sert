@@ -127,6 +127,7 @@ export async function GET(request: NextRequest) {
 
     const payload = buildDashboardPayload({
       responses: scopedResponses,
+      baselineResponses: companyResponses,
       companyLabel,
       seats: adminScope === "individual-complete" ? 1 : company?.seats,
       teamOptions,
@@ -141,6 +142,7 @@ export async function GET(request: NextRequest) {
     if (adminScope !== "individual-complete") {
       payload.companyView = buildDashboardPayload({
         responses: scopedCompanyResponses,
+        baselineResponses: companyResponses,
         companyLabel,
         seats: company?.seats,
         teamOptions,
@@ -168,6 +170,7 @@ export async function GET(request: NextRequest) {
 
     const payload = buildDashboardPayload({
       responses: filteredResponses,
+      baselineResponses: companyResponses,
       companyLabel: company?.name ?? "Empresa",
       seats: company?.seats,
       teamOptions,
@@ -199,6 +202,7 @@ export async function GET(request: NextRequest) {
     const companyAccess = buildCompanyAccessSnapshot({ company: tokenData.company, responses: companyResponses });
     const payload = buildDashboardPayload({
       responses: filteredResponses,
+      baselineResponses: companyResponses,
       companyLabel: tokenData.company.name,
       seats: tokenData.company.seats,
       teamOptions,

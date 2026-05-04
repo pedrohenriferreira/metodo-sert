@@ -16,9 +16,9 @@ const spaceGrotesk = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
-  title: "Método Sert | Saúde Mental Organizacional",
+  title: "Método Sert | Inteligência em Saúde Ocupacional",
   description:
-    "MVP para triagem de riscos psicossociais alinhado à NR-1 com escala Likert e dashboard.",
+    "Plataforma para triagem psicossocial corporativa com dashboards, compliance e fluxo acolhedor ao colaborador.",
 };
 
 export default function RootLayout({

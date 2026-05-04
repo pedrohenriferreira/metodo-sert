@@ -55,6 +55,35 @@ export const createCompanySchema = z
   })
   .strict();
 
+export const demoRequestSchema = z
+  .object({
+    companyName: companyNameSchema,
+    fullName: z
+      .string()
+      .trim()
+      .min(3, "Nome completo é obrigatório")
+      .max(120, "Nome completo é muito longo"),
+    corporateEmail: z
+      .string()
+      .trim()
+      .email("Informe um e-mail corporativo válido")
+      .max(160, "E-mail muito longo"),
+    employeeRange: z.enum(["1-50", "51-200", "201-500", "500+"], {
+      error: "Selecione o número de colaboradores.",
+    }),
+  })
+  .strict();
+
+export const demoRequestPersonalizationSchema = z
+  .object({
+    requestId: z.string().trim().uuid("Solicitação inválida."),
+    hasPsychosocialAssessment: z.boolean(),
+    urgency: z.enum(["imediato", "proximos-3-meses", "explorando"], {
+      error: "Selecione a urgência.",
+    }),
+  })
+  .strict();
+
 export const deleteCompanyOrResponseSchema = z
   .object({
     companyId: z.string().trim().uuid().optional(),

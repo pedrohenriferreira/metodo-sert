@@ -22,6 +22,15 @@ ADMIN_PASS=senha-forte
 DATA_RETENTION_DAYS=180
 LEGAL_BASIS_LABEL=legitimo_interesse_nr1
 CONSENT_VERSION=2026-04
+SMTP_HOST=smtp.seu-provedor.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=usuario-smtp
+SMTP_PASS=senha-smtp
+SMTP_FROM_EMAIL=contato@seudominio.com
+SMTP_FROM_NAME="Método Sert"
+# opcional: se quiser usar um integrador externo em vez de SMTP
+# DEMO_REQUEST_WEBHOOK_URL=https://seu-webhook.exemplo.com/demo-request
 ```
 
 ## Banco de dados
@@ -68,6 +77,16 @@ curl -X POST http://localhost:3000/api/tokens/validate \
 - Dashboard: `/dashboard` só responde se receber `view` válido (ou `x-admin-key` para uso interno).
 - Respostas, empresas e tokens ficam persistidos em PostgreSQL.
 - Exportação operacional: `GET /api/reports/company` gera CSV pseudonimizado.
+
+## Fluxo de demonstração
+- A landing redireciona `Solicitar demonstração` para `/demonstracao`.
+- Ao enviar o cadastro, o sistema cria automaticamente:
+  - `5` tokens individuais
+  - `1` token empresa
+- O envio do acesso funciona nesta ordem:
+  1. SMTP (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM_EMAIL`)
+  2. Webhook opcional (`DEMO_REQUEST_WEBHOOK_URL`)
+  3. Fallback de desenvolvimento com log no servidor
 
 ## Estrutura principal
 - `src/app/page.tsx`: redireciona para `/form`.
