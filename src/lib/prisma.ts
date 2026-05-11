@@ -9,7 +9,7 @@ const globalForPrisma = globalThis as typeof globalThis & {
 const connectionString = process.env.DATABASE_URL;
 
 if (!connectionString) {
-  throw new Error("DATABASE_URL não configurada. Defina a variável em .env.local.");
+  throw new Error("DATABASE_URL não configurada. Defina a variável em .env.");
 }
 
 function getPoolMaxFromConnectionString(value: string) {

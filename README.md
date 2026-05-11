@@ -11,7 +11,7 @@ npm run dev
 ```
 
 ## Configuração
-- Defina as variáveis em `.env.local`:
+- Defina as variáveis em `.env`:
 ```bash
 DATABASE_URL="postgresql://postgres.SEU-PROJECT-REF:SUA-SENHA@aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require"
 DIRECT_URL="postgresql://postgres:SUA-SENHA@db.SEU-PROJECT-REF.supabase.co:5432/postgres?sslmode=require"
