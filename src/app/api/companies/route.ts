@@ -50,7 +50,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Muitas requisições." }, { status: 429 });
   }
 
-  const [companies, responses] = await Promise.all([listCompanies(), readResponses()]);
+  const companies = await listCompanies();
+  const responses = await readResponses();
   const compact = companies.map((company) => {
     const normalizedTokens = company.tokens.map(normalizeToken);
     const memberTokens = normalizedTokens.filter((token) => token.tokenType === "member");

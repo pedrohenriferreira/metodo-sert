@@ -38,7 +38,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Informe a empresa para exportação." }, { status: 400 });
   }
 
-  const [companies, responses] = await Promise.all([listCompanies(), readResponses()]);
+  const companies = await listCompanies();
+  const responses = await readResponses();
   const company = companies.find((item) => item.id === resolvedCompanyId);
 
   if (!company) {
